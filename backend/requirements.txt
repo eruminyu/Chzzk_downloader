@@ -1,0 +1,8 @@
+fastapi
+uvicorn[standard]
+httpx
+streamlink
+yt-dlp
+ffmpeg-python
+python-dotenv
+pydantic-settings

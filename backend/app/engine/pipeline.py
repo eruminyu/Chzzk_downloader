@@ -1,0 +1,321 @@
+"""
+Chzzk-Recorder-Pro: FFmpeg 파이프라인 모듈
+비동기 subprocess로 FFmpeg 프로세스를 관리한다.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import asyncio.subprocess
+import signal
+from datetime import datetime
+from enum import Enum
+from pathlib import Path
+from typing import Optional
+
+from app.core.config import get_settings
+from app.core.logger import logger
+
+
+class RecordingState(str, Enum):
+    """녹화 상태."""
+
+    IDLE = "idle"
+    RECORDING = "recording"
+    STOPPING = "stopping"
+    ERROR = "error"
+    COMPLETED = "completed"
+
+
+class FFmpegPipeline:
+    """FFmpeg 기반 녹화 파이프라인.
+
+    HLS 스트림 URL을 입력받아 FFmpeg 프로세스로 녹화한다.
+    비동기 subprocess를 사용하여 논블로킹으로 동작한다.
+    """
+
+    def __init__(self, channel_id: str) -> None:
+        self._channel_id = channel_id
+        self._process: Optional[asyncio.subprocess.Process] = None
+        self._state = RecordingState.IDLE
+        self._start_time: Optional[datetime] = None
+        self._output_path: Optional[str] = None
+        self._feeder_task: Optional[asyncio.Task] = None
+        self._stream_fd = None
+
+    @property
+    def state(self) -> RecordingState:
+        return self._state
+
+    @property
+    def channel_id(self) -> str:
+        return self._channel_id
+
+    @property
+    def output_path(self) -> Optional[str]:
+        return self._output_path
+
+    @property
+    def duration_seconds(self) -> float:
+        """녹화 경과 시간(초)."""
+        start = self._start_time
+        if start is None:
+            return 0.0
+        return (datetime.now() - start).total_seconds()
+
+    async def start_recording(
+        self,
+        stream_obj: Optional[object] = None, # streamlink.Stream or string URL
+        output_dir: Optional[str] = None,
+        filename: Optional[str] = None,
+        headers: Optional[dict[str, str]] = None,
+        streamer_name: Optional[str] = None,
+        title: Optional[str] = None,
+    ) -> str:
+        """FFmpeg 녹화를 시작한다.
+
+        Args:
+            stream_url: HLS 스트림 URL.
+            output_dir: 저장 디렉토리 (기본: settings.download_dir).
+            filename: 파일명 (기본: 자동 생성).
+
+        Returns:
+            출력 파일 경로.
+        """
+        if self._state == RecordingState.RECORDING:
+            logger.warning(f"[{self._channel_id}] 이미 녹화 중입니다.")
+            return self._output_path or ""
+
+        settings = get_settings()
+        ffmpeg_path = settings.resolve_ffmpeg_path()
+
+        # 저장 경로 결정
+        save_dir = Path(output_dir or settings.download_dir)
+        save_dir.mkdir(parents=True, exist_ok=True)
+
+        if not filename:
+            # 2026_02_10_1726_스트리머_제목.{format} 형식
+            now = datetime.now()
+            ts_str = now.strftime("%Y_%m_%d_%H：%M")
+            ext = settings.output_format or "ts"
+
+            raw_name = f"{ts_str}_{streamer_name or self._channel_id}_{title or 'live'}"
+            filename = self._clean_filename(raw_name) + f".{ext}"
+
+        output_file = save_dir / filename
+        self._output_path = str(output_file)
+
+        # FFmpeg 명령어 구성
+        cmd = [
+            ffmpeg_path,
+        ]
+
+        is_hybrid = False
+        input_source = ""
+
+        if stream_obj and not isinstance(stream_obj, str):
+            # Hybrid Mode: Streamlink Object (piped via stdin)
+            is_hybrid = True
+            input_source = "pipe:0"
+            # FFmpeg needs to know the format if coming via pipe
+            # But for TS/HLS, 'copy' usually works with 'pipe:0'
+        else:
+            # Legacy Mode: Direct URL
+            input_source = str(stream_obj) if stream_obj else ""
+            if headers:
+                header_str = "".join([f"{k}: {v}\r\n" for k, v in headers.items()])
+                cmd.extend(["-headers", header_str])
+
+        cmd.extend(["-i", input_source, "-c", "copy"])
+
+        # 포맷별 옵션
+        ext = settings.output_format or "ts"
+        if ext in ("mp4", "mkv"):
+            cmd.extend(["-bsf:a", "aac_adtstoasc"])
+        if ext == "mp4":
+            cmd.extend(["-movflags", "+faststart"])
+
+        cmd.extend(["-y", str(output_file)])
+
+        logger.info(f"[{self._channel_id}] FFmpeg 녹화 시작({'Hybrid' if is_hybrid else 'Direct'}): {output_file}")
+        logger.debug(f"[{self._channel_id}] FFmpeg CMD: {' '.join(cmd)}")
+
+        try:
+            self._process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            self._state = RecordingState.RECORDING
+            self._start_time = datetime.now()
+
+            # Hybrid Mode일 경우 데이터 피더 작동
+            if is_hybrid and stream_obj:
+                self._feeder_task = asyncio.create_task(
+                    self._run_feeder(stream_obj)
+                )
+
+            # 백그라운드에서 프로세스 종료 감시
+            asyncio.create_task(self._watch_process())
+
+            return self._output_path or ""
+
+        except FileNotFoundError:
+            # ffmpeg 실행 파일 자체를 찾지 못한 경우
+            self._state = RecordingState.ERROR
+            raise FileNotFoundError(
+                f"FFmpeg를 찾을 수 없습니다: {ffmpeg_path}"
+            )
+        except Exception as e:
+            import traceback
+            self._state = RecordingState.ERROR
+            logger.error(f"[{self._channel_id}] FFmpeg 시작 실패 ({type(e).__name__}): {e}")
+            logger.error(traceback.format_exc())
+            raise
+
+    async def _run_feeder(self, stream_obj: object) -> None:
+        """Streamlink 데이터를 FFmpeg stdin으로 전달한다."""
+        try:
+            # streamlink.Stream.open()은 blocking이므로 스레드에서 실행
+            self._stream_fd = await asyncio.to_thread(lambda: stream_obj.open()) # type: ignore
+            
+            while self._state == RecordingState.RECORDING:
+                # 데이터 읽기 (128KB 덩어리)
+                data = await asyncio.to_thread(lambda: self._stream_fd.read(1024 * 128)) # type: ignore
+                if not data:
+                    logger.info(f"[{self._channel_id}] 스트림 소스 종료 (EOF).")
+                    break
+                
+                if self._process and self._process.stdin:
+                    self._process.stdin.write(data)
+                    await self._process.stdin.drain()
+                else:
+                    break
+                    
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.error(f"[{self._channel_id}] 데이터 피더 오류: {e}")
+        finally:
+            if self._stream_fd:
+                try:
+                    self._stream_fd.close()
+                except:
+                    pass
+            if self._process and self._process.stdin and not self._process.stdin.is_closing():
+                try:
+                    self._process.stdin.close()
+                except:
+                    pass
+
+    async def stop_recording(self) -> None:
+        """FFmpeg 녹화를 정상 종료한다."""
+        proc = self._process
+        if proc is None or self._state not in (RecordingState.RECORDING, RecordingState.ERROR):
+            logger.warning(f"[{self._channel_id}] 녹화 중이 아닙니다.")
+            return
+
+        self._state = RecordingState.STOPPING
+        logger.info(f"[{self._channel_id}] FFmpeg 정상 종료 요청...")
+
+        # ── 1. Feeder Task 취소 (Streamlink 스트림 핸들 해제) ──
+        feeder = self._feeder_task
+        if feeder is not None and not feeder.done():
+            feeder.cancel()
+            try:
+                await feeder
+            except asyncio.CancelledError:
+                pass
+            logger.debug(f"[{self._channel_id}] Feeder task 취소 완료.")
+        self._feeder_task = None
+
+        # ── 2. Stream FD 강제 종료 ──
+        if self._stream_fd is not None:
+            try:
+                await asyncio.to_thread(self._stream_fd.close)
+            except Exception:
+                pass
+            self._stream_fd = None
+            logger.debug(f"[{self._channel_id}] Stream FD 종료 완료.")
+
+        # ── 3. FFmpeg 프로세스 종료 ──
+        if proc is not None and proc.returncode is None:
+            try:
+                # Windows에서는 SIGINT 대신 stdin에 'q' 전송
+                stdin = proc.stdin
+                if stdin is not None and not stdin.is_closing():
+                    try:
+                        stdin.write(b"q")
+                        await stdin.drain()
+                    except (BrokenPipeError, ConnectionResetError, OSError):
+                        pass
+                    try:
+                        stdin.close()
+                    except Exception:
+                        pass
+                else:
+                    proc.terminate()
+
+                # 최대 10초 대기
+                await asyncio.wait_for(proc.wait(), timeout=10.0)
+                logger.info(
+                    f"[{self._channel_id}] 녹화 완료. "
+                    f"경과 시간: {self.duration_seconds:.0f}초, "
+                    f"파일: {self._output_path}"
+                )
+            except asyncio.TimeoutError:
+                logger.warning(f"[{self._channel_id}] FFmpeg 종료 타임아웃. 강제 종료합니다.")
+                proc.kill()
+                await proc.wait()
+
+        self._state = RecordingState.COMPLETED
+        self._process = None
+
+    async def _watch_process(self) -> None:
+        """FFmpeg 프로세스의 종료를 감시한다."""
+        proc = self._process
+        if proc is None:
+            return
+
+        return_code = await proc.wait()
+
+        if self._state == RecordingState.RECORDING:
+            # 예상치 못한 종료
+            if return_code != 0:
+                stderr_data = b""
+                stderr_stream = proc.stderr
+                if stderr_stream is not None:
+                    stderr_data = await stderr_stream.read()
+                err_text: str = stderr_data.decode(errors="replace")
+                tail: str = err_text[len(err_text) - 500:]  # pyre-ignore[16]: Pyre2 str slice bug
+                logger.error(
+                    f"[{self._channel_id}] FFmpeg 비정상 종료 (code={return_code}): "
+                    f"{tail}"
+                )
+                self._state = RecordingState.ERROR
+            else:
+                self._state = RecordingState.COMPLETED
+                logger.info(f"[{self._channel_id}] FFmpeg 프로세스 정상 종료.")
+
+    def get_status(self) -> dict:
+        """현재 녹화 상태를 딕셔너리로 반환."""
+        start = self._start_time
+        return {
+            "channel_id": self._channel_id,
+            "state": self._state.value,
+            "is_recording": self._state == RecordingState.RECORDING,
+            "output_path": self._output_path,
+            "duration_seconds": round(float(self.duration_seconds), 1),  # pyre-ignore[6]: Pyre2 round overload bug
+            "start_time": start.isoformat() if start is not None else None,
+        }
+
+    def _clean_filename(self, name: str) -> str:
+        """파일명에서 사용할 수 없는 특수문자를 제거한다."""
+        import re
+        # Windows 파일명 금지 문자: \ / : * ? " < > |
+        cleaned = re.sub(r'[\\/:*?"<>|]', '_', name)
+        # 공백은 언더바로 대체 (선택사항, 하지만 더 깔끔함)
+        cleaned = cleaned.replace(" ", "_").strip()
+        # 점으로 시작하거나 끝나는 경우 등 추가 정제
+        return cleaned[:150] # 길이 제한 (안전하게 150자)

@@ -1,0 +1,15 @@
+{
+    "include": [
+        "backend"
+    ],
+    "extraPaths": [
+        "backend"
+    ],
+    "pythonVersion": "3.10",
+    "pythonPlatform": "Windows",
+    "venvPath": "backend",
+    "venv": ".venv",
+    "reportMissingModuleSource": false,
+    "reportMissingTypeStubs": false,
+    "typeCheckingMode": "standard"
+}

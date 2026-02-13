@@ -1,0 +1,65 @@
+@import "tailwindcss";
+
+/* ── Chzzk 커스텀 테마 ────────────────────────────── */
+@theme {
+  --color-chzzk: #00FFA3;
+  --color-chzzk-dark: #00D689;
+  --color-chzzk-bg: #0F1014;
+  --color-chzzk-card: #1B1D24;
+  --color-chzzk-hover: #252830;
+}
+
+/* ── 기본 스타일 ──────────────────────────────────── */
+body {
+  background-color: var(--color-chzzk-bg);
+  color: #E2E8F0;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+}
+
+code, .font-mono {
+  font-family: 'JetBrains Mono', 'Consolas', monospace;
+}
+
+/* ── 스크롤바 ─────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #1B1D24;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #475569;
+}
+
+/* ── 선택 영역 ────────────────────────────────────── */
+::selection {
+  background-color: #00FFA3;
+  color: #000;
+}
+
+/* ── 애니메이션 ───────────────────────────────────── */
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slide-in-from-top {
+  from { opacity: 0; transform: translateY(-16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.5s ease-out;
+}
+
+.animate-slide-in-top {
+  animation: slide-in-from-top 0.3s ease-out;
+}
