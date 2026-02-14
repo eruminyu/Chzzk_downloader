@@ -1,79 +1,77 @@
-import { useState, useEffect } from "react";
-import { Download, Play, AlertCircle, CheckCircle, Loader2, Pause, Square, RotateCcw } from "lucide-react";
-import { api, VodInfo, VodStatus } from "../api/client";
+import { useState } from "react";
+import {
+    Download,
+    Play,
+    AlertCircle,
+    CheckCircle,
+    Loader2,
+    Pause,
+    Square,
+    FileVideo,
+    Clock,
+    RotateCw,
+    GripVertical,
+    FolderOpen,
+    Trash2,
+} from "lucide-react";
+import { useVod } from "../contexts/VodContext";
+import { api, VodTask } from "../api/client";
 import { clsx } from "clsx";
 
 export default function VodDownload() {
+    const { tasks, activeCount, addTask, cancelTask, pauseTask, resumeTask, retryTask, clearCompleted, openFileLocation } = useVod();
     const [url, setUrl] = useState("");
-    const [info, setInfo] = useState<VodInfo | null>(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
-    const [status, setStatus] = useState<VodStatus | null>(null);
+    const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
 
-    // Poll status every 2 seconds
-    useEffect(() => {
-        const interval = setInterval(async () => {
-            try {
-                const s = await api.getVodStatus();
-                setStatus(s);
-                if (s.state === 'downloading' || s.state === 'idle') {
-                    // Keep polling
-                }
-            } catch (e) {
-                console.error("Status check failed", e);
-            }
-        }, 2000);
-        return () => clearInterval(interval);
-    }, []);
-
-    const handleCheckInfo = async () => {
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
         if (!url) return;
+
         setLoading(true);
         setError(null);
-        setInfo(null);
+
         try {
-            const data = await api.getVodInfo(url);
-            setInfo(data);
+            // URL 입력 즉시 다운로드 시작 (자동 체크 + 다운로드)
+            await addTask(url);
+            setUrl(""); // 입력 필드 초기화
         } catch (err: any) {
-            setError(err.response?.data?.detail || "Failed to fetch video info");
+            setError(err.response?.data?.detail || "다운로드 시작 실패");
         } finally {
             setLoading(false);
         }
     };
 
-    const handleDownload = async () => {
-        if (!url) return;
-        try {
-            await api.downloadVod(url);
-            // Status polling will pick up the change
-        } catch (err: any) {
-            setError(err.response?.data?.detail || "Failed to start download");
-        }
+    const handleDragStart = (index: number) => {
+        setDraggedIndex(index);
     };
 
-    const handleCancel = async () => {
-        if (!confirm("Cancel download?")) return;
-        try {
-            await api.cancelVodDownload();
-        } catch (e) {
-            console.error(e);
-        }
+    const handleDragOver = (e: React.DragEvent, index: number) => {
+        e.preventDefault();
     };
 
-    const handlePause = async () => {
-        try {
-            await api.pauseVodDownload();
-        } catch (e) {
-            console.error(e);
+    const handleDrop = async (e: React.DragEvent, dropIndex: number) => {
+        e.preventDefault();
+        if (draggedIndex === null || draggedIndex === dropIndex) {
+            setDraggedIndex(null);
+            return;
         }
-    };
 
-    const handleResume = async () => {
+        // 배열 재정렬
+        const newTasks = [...tasks];
+        const [draggedTask] = newTasks.splice(draggedIndex, 1);
+        newTasks.splice(dropIndex, 0, draggedTask);
+
+        // 백엔드에 순서 업데이트
         try {
-            await api.resumeVodDownload();
-        } catch (e) {
-            console.error(e);
+            const taskIds = newTasks.map((t) => t.task_id);
+            await api.reorderVodTasks(taskIds);
+        } catch (err) {
+            console.error("작업 순서 변경 실패:", err);
         }
+
+        setDraggedIndex(null);
     };
 
     return (
@@ -83,132 +81,310 @@ export default function VodDownload() {
                     <Download className="w-6 h-6 text-green-500" />
                     VOD Downloader
                 </h2>
-                <p className="text-zinc-400">Download VODs and Clips from Chzzk.</p>
+                <p className="text-zinc-400">
+                    활성 다운로드: <span className="text-green-500 font-bold">{activeCount}</span>
+                </p>
             </div>
 
-            {/* URL Input Section */}
-            <div className="bg-zinc-900/50 p-6 rounded-xl border border-zinc-800 space-y-4">
+            {/* URL 입력 폼 */}
+            <form
+                onSubmit={handleSubmit}
+                className="bg-zinc-900/50 p-6 rounded-xl border border-zinc-800 space-y-4"
+            >
                 <label className="block text-sm font-medium text-zinc-300">
-                    Video URL
+                    영상 URL
                 </label>
                 <div className="flex gap-2">
                     <input
                         type="text"
                         className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-green-500/50"
-                        placeholder="https://chzzk.naver.com/video/..."
+                        placeholder="치지직 VOD/클립 또는 유튜브 등 (https://...)"
                         value={url}
                         onChange={(e) => setUrl(e.target.value)}
                     />
                     <button
-                        onClick={handleCheckInfo}
+                        type="submit"
                         disabled={loading || !url}
-                        className="bg-zinc-800 hover:bg-zinc-700 text-white px-4 py-2 rounded-lg font-medium transition-colors disabled:opacity-50"
+                        className="bg-green-600 hover:bg-green-500 text-white px-6 py-2 rounded-lg font-bold transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                     >
-                        {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : "Check"}
+                        {loading ? (
+                            <>
+                                <Loader2 className="w-5 h-5 animate-spin" />
+                                추가 중...
+                            </>
+                        ) : (
+                            <>
+                                <Download className="w-5 h-5" />
+                                다운로드 시작
+                            </>
+                        )}
                     </button>
                 </div>
+
                 {error && (
                     <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg flex items-center gap-2 text-red-400 text-sm">
                         <AlertCircle className="w-4 h-4" />
                         {error}
                     </div>
                 )}
+
+                <div className="flex flex-wrap gap-3 text-xs text-zinc-500">
+                    <span className="flex items-center">
+                        <CheckCircle className="w-3 h-3 mr-1 text-green-500" /> 1080p60 지원
+                    </span>
+                    <span className="flex items-center">
+                        <CheckCircle className="w-3 h-3 mr-1 text-green-500" /> MP4 자동 리먹싱
+                    </span>
+                    <span className="flex items-center">
+                        <CheckCircle className="w-3 h-3 mr-1 text-green-500" /> 클립 다운로드 지원
+                    </span>
+                    <span className="flex items-center">
+                        <CheckCircle className="w-3 h-3 mr-1 text-green-500" /> 다중 다운로드 지원
+                    </span>
+                </div>
+            </form>
+
+            {/* 다운로드 목록 */}
+            <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                    <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                        다운로드 목록
+                        <span className="text-xs bg-zinc-800 text-zinc-400 px-2 py-0.5 rounded-full">
+                            {tasks.length}
+                        </span>
+                    </h3>
+                    {tasks.some(t => t.state === "completed" || t.state === "error") && (
+                        <button
+                            onClick={clearCompleted}
+                            className="flex items-center gap-2 px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white rounded-lg text-sm border border-zinc-700 transition-colors"
+                        >
+                            <Trash2 className="w-4 h-4" />
+                            완료된 작업 정리
+                        </button>
+                    )}
+                </div>
+
+                {tasks.length === 0 ? (
+                    <div className="text-center py-20 bg-zinc-900/30 rounded-xl border border-zinc-800 border-dashed">
+                        <FileVideo className="w-16 h-16 text-zinc-700 mx-auto mb-4" />
+                        <p className="text-zinc-500 font-medium">활성 다운로드 없음</p>
+                        <p className="text-sm text-zinc-600">위에 URL을 입력하여 시작하세요</p>
+                    </div>
+                ) : (
+                    <div className="space-y-3">
+                        {tasks.map((task, index) => (
+                            <div
+                                key={task.task_id}
+                                draggable
+                                onDragStart={() => handleDragStart(index)}
+                                onDragOver={(e) => handleDragOver(e, index)}
+                                onDrop={(e) => handleDrop(e, index)}
+                                className={clsx(
+                                    "transition-opacity",
+                                    draggedIndex === index && "opacity-50"
+                                )}
+                            >
+                                <TaskCard
+                                    task={task}
+                                    onCancel={() => cancelTask(task.task_id)}
+                                    onPause={() => pauseTask(task.task_id)}
+                                    onResume={() => resumeTask(task.task_id)}
+                                    onRetry={() => retryTask(task.task_id)}
+                                    onOpenLocation={() => openFileLocation(task.task_id)}
+                                />
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+}
+
+// ── 헬퍼 함수 ──────────────────────────────────────
+
+function formatETA(seconds: number): string {
+    if (seconds <= 0) return "계산 중...";
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = Math.floor(seconds % 60);
+    if (h > 0) return `${h}시간 ${m}분`;
+    if (m > 0) return `${m}분 ${s}초`;
+    return `${s}초`;
+}
+
+// ── 다운로드 태스크 카드 ─────────────────────────────
+
+interface TaskCardProps {
+    task: VodTask;
+    onCancel: () => void;
+    onPause: () => void;
+    onResume: () => void;
+    onRetry: () => void;
+    onOpenLocation: () => void;
+}
+
+function TaskCard({ task, onCancel, onPause, onResume, onRetry, onOpenLocation }: TaskCardProps) {
+    const statusBadgeClass =
+        task.state === "completed"
+            ? "bg-green-500/10 text-green-500"
+            : task.state === "downloading"
+                ? "bg-blue-500/10 text-blue-500"
+                : task.state === "paused"
+                    ? "bg-yellow-500/10 text-yellow-500"
+                    : task.state === "error"
+                        ? "bg-red-500/10 text-red-500"
+                        : "bg-zinc-800 text-zinc-400";
+
+    const statusLabels: Record<string, string> = {
+        idle: "대기",
+        downloading: "다운로드 중",
+        paused: "일시정지",
+        completed: "완료",
+        error: "오류",
+        cancelling: "취소 중",
+    };
+
+    const barColorClass =
+        task.state === "completed"
+            ? "bg-green-500"
+            : task.state === "error"
+                ? "bg-red-500"
+                : task.state === "paused"
+                    ? "bg-yellow-500"
+                    : "bg-blue-500";
+
+    return (
+        <div className="bg-zinc-900/50 border border-zinc-800 p-4 rounded-xl flex items-start gap-4 hover:border-zinc-700 transition-colors cursor-move">
+            {/* 드래그 핸들 */}
+            <div className="flex items-center justify-center text-zinc-600 hover:text-zinc-400 cursor-grab active:cursor-grabbing pt-8">
+                <GripVertical className="w-5 h-5" />
             </div>
 
-            {/* Video Info Card */}
-            {info && (
-                <div className="bg-zinc-900/50 p-6 rounded-xl border border-zinc-800 flex gap-6 animate-in fade-in slide-in-from-bottom-4">
-                    <img
-                        src={info.thumbnail}
-                        alt={info.title}
-                        className="w-64 aspect-video object-cover rounded-lg shadow-lg border border-zinc-700"
+            {/* 상태 아이콘 영역 */}
+            <div className="w-24 h-20 bg-zinc-950 rounded-lg flex items-center justify-center flex-shrink-0">
+                {task.state === "completed" && <CheckCircle className="text-green-500 w-8 h-8" />}
+                {task.state === "downloading" && (
+                    <div className="text-white font-mono font-bold text-lg">
+                        {Math.round(task.progress)}%
+                    </div>
+                )}
+                {task.state === "paused" && <Pause className="text-yellow-500 w-8 h-8" />}
+                {task.state === "error" && <AlertCircle className="text-red-500 w-8 h-8" />}
+                {task.state === "idle" && <Clock className="text-zinc-500 w-8 h-8" />}
+                {task.state === "cancelling" && (
+                    <Loader2 className="text-red-500 w-6 h-6 animate-spin" />
+                )}
+            </div>
+
+            <div className="flex-1 min-w-0 w-full space-y-2">
+                <div className="flex justify-between items-start gap-2">
+                    <h4 className="font-bold text-white truncate text-sm flex-1">
+                        {task.title}
+                    </h4>
+                    <span
+                        className={clsx(
+                            "text-xs font-bold px-2 py-1 rounded capitalize whitespace-nowrap",
+                            statusBadgeClass
+                        )}
+                    >
+                        {statusLabels[task.state] || task.state}
+                    </span>
+                </div>
+
+                <div className="text-xs text-zinc-500 font-mono flex flex-wrap gap-x-4">
+                    <span>화질: {task.quality}</span>
+                    {task.error_message && (
+                        <span className="text-red-400">오류: {task.error_message}</span>
+                    )}
+                </div>
+
+                {/* 진행률 바 */}
+                <div className="w-full bg-zinc-800 h-2 rounded-full overflow-hidden">
+                    <div
+                        className={clsx("h-full transition-all duration-300", barColorClass)}
+                        style={{ width: `${task.progress}%` }}
                     />
-                    <div className="flex-1 space-y-4">
-                        <div>
-                            <h3 className="text-xl font-bold text-white line-clamp-2">
-                                {info.title}
-                            </h3>
-                            <p className="text-zinc-400 mt-1">{info.uploader}</p>
-                        </div>
+                </div>
 
-                        <div className="flex items-center gap-4 text-sm text-zinc-500">
-                            <span className="flex items-center gap-1">
-                                <Play className="w-4 h-4" />
-                                {Math.floor(info.duration / 60)}m {info.duration % 60}s
+                {/* 다운로드 통계 (다운로드 중일 때만 표시) */}
+                {task.state === "downloading" && task.total_bytes > 0 && (
+                    <div className="text-xs text-zinc-400 font-mono flex flex-wrap gap-x-4 gap-y-1">
+                        <span>
+                            속도: <span className="text-green-400">{task.download_speed.toFixed(2)} MB/s</span>
+                        </span>
+                        <span>
+                            용량: {(task.downloaded_bytes / (1024 * 1024)).toFixed(1)} MB / {(task.total_bytes / (1024 * 1024)).toFixed(1)} MB
+                        </span>
+                        {task.eta_seconds > 0 && (
+                            <span>
+                                남은 시간: {formatETA(task.eta_seconds)}
                             </span>
-                        </div>
+                        )}
+                    </div>
+                )}
 
+                {/* 제어 버튼 */}
+                {(task.state === "downloading" || task.state === "paused") && (
+                    <div className="flex gap-2">
+                        {task.state === "downloading" ? (
+                            <button
+                                onClick={onPause}
+                                className="p-1.5 bg-zinc-800 hover:bg-zinc-700 text-yellow-400 rounded-lg transition-colors flex items-center gap-1 text-xs"
+                                title="일시정지"
+                            >
+                                <Pause className="w-3 h-3" />
+                                <span>일시정지</span>
+                            </button>
+                        ) : (
+                            <button
+                                onClick={onResume}
+                                className="p-1.5 bg-zinc-800 hover:bg-zinc-700 text-green-400 rounded-lg transition-colors flex items-center gap-1 text-xs"
+                                title="재개"
+                            >
+                                <Play className="w-3 h-3" />
+                                <span>재개</span>
+                            </button>
+                        )}
                         <button
-                            onClick={handleDownload}
-                            disabled={status?.state === 'downloading'}
-                            className="mt-4 bg-green-600 hover:bg-green-500 text-white px-6 py-2 rounded-lg font-bold shadow-lg shadow-green-900/20 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                            onClick={() => {
+                                if (confirm("다운로드를 취소하시겠습니까?")) onCancel();
+                            }}
+                            className="p-1.5 bg-zinc-800 hover:bg-zinc-700 text-red-400 rounded-lg transition-colors flex items-center gap-1 text-xs"
+                            title="취소"
                         >
-                            {status?.state === 'downloading' ? 'Download in Progress...' : 'Start Download'}
+                            <Square className="w-3 h-3" />
+                            <span>취소</span>
                         </button>
                     </div>
-                </div>
-            )}
+                )}
 
-            {/* Progress Status */}
-            {status && status.state !== 'idle' && (
-                <div className="bg-zinc-900/50 p-6 rounded-xl border border-zinc-800 space-y-3">
-                    <div className="flex justify-between items-center">
-                        <h4 className="font-medium text-white flex items-center gap-2">
-                            {status.state === 'downloading' && <Loader2 className="w-4 h-4 animate-spin text-blue-500" />}
-                            {status.state === 'paused' && <Pause className="w-4 h-4 text-yellow-500" />}
-                            {status.state === 'completed' && <CheckCircle className="w-4 h-4 text-green-500" />}
-                            {status.state === 'error' && <AlertCircle className="w-4 h-4 text-red-500" />}
-                            {status.state === 'cancelling' && <Loader2 className="w-4 h-4 animate-spin text-red-500" />}
-                            <span className="capitalize">{status.state}</span>
-                        </h4>
-
-                        <div className="flex items-center gap-3">
-                            {(status.state === 'downloading' || status.state === 'paused') && (
-                                <div className="flex gap-1">
-                                    {status.state === 'downloading' ? (
-                                        <button
-                                            onClick={handlePause}
-                                            className="p-1.5 bg-zinc-800 hover:bg-zinc-700 text-yellow-400 rounded-lg transition-colors"
-                                            title="Pause"
-                                        >
-                                            <Pause className="w-4 h-4 fill-current" />
-                                        </button>
-                                    ) : (
-                                        <button
-                                            onClick={handleResume}
-                                            className="p-1.5 bg-zinc-800 hover:bg-zinc-700 text-green-400 rounded-lg transition-colors"
-                                            title="Resume"
-                                        >
-                                            <Play className="w-4 h-4 fill-current" />
-                                        </button>
-                                    )}
-                                    <button
-                                        onClick={handleCancel}
-                                        className="p-1.5 bg-zinc-800 hover:bg-zinc-700 text-red-400 rounded-lg transition-colors"
-                                        title="Cancel"
-                                    >
-                                        <Square className="w-4 h-4 fill-current" />
-                                    </button>
-                                </div>
-                            )}
-                            <span className="text-zinc-400 text-sm font-mono">{status.progress.toFixed(1)}%</span>
-                        </div>
+                {/* 재다운로드 버튼 (완료/에러 상태일 때만 표시) */}
+                {(task.state === "completed" || task.state === "error") && (
+                    <div className="flex gap-2">
+                        <button
+                            onClick={() => {
+                                if (confirm("이 영상을 다시 다운로드하시겠습니까?")) onRetry();
+                            }}
+                            className="p-1.5 bg-zinc-800 hover:bg-zinc-700 text-blue-400 rounded-lg transition-colors flex items-center gap-1 text-xs"
+                            title="재다운로드"
+                        >
+                            <RotateCw className="w-3 h-3" />
+                            <span>재다운로드</span>
+                        </button>
+                        {task.state === "completed" && task.output_path && (
+                            <button
+                                onClick={onOpenLocation}
+                                className="p-1.5 bg-zinc-800 hover:bg-zinc-700 text-green-400 rounded-lg transition-colors flex items-center gap-1 text-xs"
+                                title="파일 위치 열기"
+                            >
+                                <FolderOpen className="w-3 h-3" />
+                                <span>폴더 열기</span>
+                            </button>
+                        )}
                     </div>
-
-                    <div className="h-2 bg-zinc-800 rounded-full overflow-hidden">
-                        <div
-                            className={clsx(
-                                "h-full transition-all duration-500 ease-out",
-                                status.state === 'completed' ? "bg-green-500" :
-                                    status.state === 'error' || status.state === 'cancelling' ? "bg-red-500" :
-                                        status.state === 'paused' ? "bg-yellow-500" : "bg-blue-500"
-                            )}
-                            style={{ width: `${status.progress}%` }}
-                        />
-                    </div>
-                    <p className="text-xs text-zinc-500 truncate">{status.title || 'Preparing...'}</p>
-                </div>
-            )}
+                )}
+            </div>
         </div>
     );
 }

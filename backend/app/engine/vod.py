@@ -7,7 +7,11 @@ yt-dlp를 사용하여 치지직 VOD/클립을 다운로드한다.
 from __future__ import annotations
 
 import asyncio
+import json
 import threading
+import uuid
+from dataclasses import dataclass, field
+from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -32,37 +36,88 @@ class VodDownloadState(str, Enum):
     CANCELLING = "cancelling"
 
 
+@dataclass
+class VodDownloadTask:
+    """개별 다운로드 작업."""
+
+    task_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    url: str = ""
+    title: str = "Unknown"
+    state: VodDownloadState = VodDownloadState.IDLE
+    progress: float = 0.0
+    quality: str = "best"
+    output_dir: str = ""
+    output_path: Optional[str] = None
+    expected_part_file: Optional[str] = None
+    error_message: Optional[str] = None
+    created_at: datetime = field(default_factory=datetime.now)
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+
+    # 다운로드 통계
+    download_speed: float = 0.0  # MB/s
+    downloaded_bytes: int = 0  # 바이트
+    total_bytes: int = 0  # 바이트
+    eta_seconds: int = 0  # 예상 남은 시간 (초)
+
+    # 재시도 관련
+    retry_count: int = 0  # 현재까지 재시도 횟수
+    max_retries: int = 3  # 최대 재시도 횟수
+
+    # 제어 플래그 (각 작업별 독립)
+    cancel_flag: bool = False
+    pause_event: threading.Event = field(default_factory=threading.Event)
+    download_task: Optional[asyncio.Task] = None
+
+    def __post_init__(self) -> None:
+        self.pause_event.set()  # 초기 상태: 일시정지 아님
+
+
 class VodEngine:
     """yt-dlp 기반 VOD/클립 다운로드 엔진.
 
     치지직 다시보기 및 클립 URL을 파싱하여 고속 다운로드한다.
     인증 쿠키를 통해 성인 인증 영상에도 접근 가능하다.
     취소, 일시정지, 재개 기능을 제공한다.
+
+    다중 다운로드를 지원하며, task_id로 각 작업을 관리한다.
     """
 
     def __init__(self, auth: Optional[AuthManager] = None) -> None:
         self._auth = auth or AuthManager()
-        self._state = VodDownloadState.IDLE
-        self._progress: float = 0.0
-        self._current_title: Optional[str] = None
-        # 다운로드 제어
-        self._cancel_flag = False
-        self._pause_event = threading.Event()
-        self._pause_event.set()  # 초기 상태: 일시정지 아님 (통과)
-        self._download_task: Optional[asyncio.Task] = None
+        self._tasks: dict[str, VodDownloadTask] = {}
+
+        # 설정에서 동시 다운로드 개수 가져오기
+        settings = get_settings()
+        self._max_concurrent = settings.vod_max_concurrent
+        self._semaphore = asyncio.Semaphore(self._max_concurrent)
+
+        self._history_file = Path("data/vod_history.json")
+        self._load_history()
 
     @property
     def state(self) -> VodDownloadState:
-        return self._state
+        """하위 호환성을 위한 속성. 첫 번째 작업의 상태 반환."""
+        if not self._tasks:
+            return VodDownloadState.IDLE
+        first_task = next(iter(self._tasks.values()))
+        return first_task.state
 
     @property
     def progress(self) -> float:
-        return self._progress
+        """하위 호환성을 위한 속성. 첫 번째 작업의 진행률 반환."""
+        if not self._tasks:
+            return 0.0
+        first_task = next(iter(self._tasks.values()))
+        return first_task.progress
+
+    def _is_chzzk_url(self, url: str) -> bool:
+        """치지직 URL인지 확인."""
+        return "chzzk.naver.com" in url
 
     def _build_ytdlp_options(
         self,
-        output_dir: str,
-        quality: str = "best",
+        task: VodDownloadTask,
         progress_callback: Optional[Callable[[dict], None]] = None,
     ) -> dict[str, Any]:
         """yt-dlp 옵션 딕셔너리를 구성한다."""
@@ -71,57 +126,78 @@ class VodEngine:
         ffmpeg_dir = str(Path(ffmpeg_path).parent)
 
         opts: dict[str, Any] = {
-            "format": quality,
-            "outtmpl": str(Path(output_dir) / "%(title)s_%(id)s.%(ext)s"),
+            "format": task.quality,
+            "outtmpl": str(Path(task.output_dir) / "[%(uploader,channel)s] %(title)s.%(ext)s"),
             "ffmpeg_location": ffmpeg_dir,
             "no_warnings": True,
             "quiet": True,
             "no_color": True,
         }
 
-        # 인증 쿠키 주입
-        cookies = self._auth.get_cookies()
-        if cookies:
-            # yt-dlp에 쿠키를 전달하는 방법: http_headers를 통한 Cookie 헤더
-            opts["http_headers"] = {
-                "Cookie": cookies.to_cookie_string(),
-                "User-Agent": (
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/131.0.0.0 Safari/537.36"
-                ),
-            }
+        # 치지직 URL인 경우에만 인증 쿠키 주입
+        if self._is_chzzk_url(task.url):
+            cookies = self._auth.get_cookies()
+            if cookies:
+                # yt-dlp에 쿠키를 전달하는 방법: http_headers를 통한 Cookie 헤더
+                opts["http_headers"] = {
+                    "Cookie": cookies.to_cookie_string(),
+                    "User-Agent": (
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/131.0.0.0 Safari/537.36"
+                    ),
+                }
 
         # 진행률 콜백
         if progress_callback:
             opts["progress_hooks"] = [progress_callback]
 
+        # 속도 제한 (MB/s → bytes/s)
+        if settings.vod_max_speed > 0:
+            opts["ratelimit"] = settings.vod_max_speed * 1024 * 1024  # MB/s to bytes/s
+
         return opts
 
-    def _on_progress(self, d: dict) -> None:
-        """yt-dlp 진행률 콜백 핸들러.
-        
-        이 콜백 내에서 취소/일시정지를 제어한다.
-        yt-dlp가 주기적으로 이 콜백을 호출하므로, 여기서 blocking하면 일시정지 효과가 나타남.
-        """
-        # 취소 체크 — 즉시 예외로 yt-dlp를 중단
-        if self._cancel_flag:
-            raise DownloadCancelledError("다운로드가 취소되었습니다.")
+    def _make_progress_callback(self, task: VodDownloadTask) -> Callable[[dict], None]:
+        """task별 진행률 콜백 생성."""
+        def _on_progress(d: dict) -> None:
+            """yt-dlp 진행률 콜백 핸들러.
 
-        # 일시정지 체크 — event가 set될 때까지 blocking
-        self._pause_event.wait()
+            이 콜백 내에서 취소/일시정지를 제어한다.
+            yt-dlp가 주기적으로 이 콜백을 호출하므로, 여기서 blocking하면 일시정지 효과가 나타남.
+            """
+            # 취소 체크 — 즉시 예외로 yt-dlp를 중단
+            if task.cancel_flag:
+                raise DownloadCancelledError("다운로드가 취소되었습니다.")
 
-        # 다시 취소 체크 (일시정지 해제 후 취소된 경우)
-        if self._cancel_flag:
-            raise DownloadCancelledError("다운로드가 취소되었습니다.")
+            # 일시정지 체크 — event가 set될 때까지 blocking
+            task.pause_event.wait()
 
-        if d.get("status") == "downloading":
-            total = d.get("total_bytes") or d.get("total_bytes_estimate", 0)
-            downloaded = d.get("downloaded_bytes", 0)
-            if total > 0:
-                self._progress = (downloaded / total) * 100
-        elif d.get("status") == "finished":
-            self._progress = 100.0
+            # 다시 취소 체크 (일시정지 해제 후 취소된 경우)
+            if task.cancel_flag:
+                raise DownloadCancelledError("다운로드가 취소되었습니다.")
+
+            if d.get("status") == "downloading":
+                total = d.get("total_bytes") or d.get("total_bytes_estimate", 0)
+                downloaded = d.get("downloaded_bytes", 0)
+                if total > 0:
+                    task.progress = (downloaded / total) * 100
+
+                # 다운로드 통계 업데이트
+                task.downloaded_bytes = downloaded
+                task.total_bytes = total
+
+                # 속도 (bytes/s → MB/s)
+                speed_bytes = d.get("speed", 0) or 0
+                task.download_speed = speed_bytes / (1024 * 1024) if speed_bytes > 0 else 0.0
+
+                # 예상 남은 시간 (초)
+                task.eta_seconds = d.get("eta", 0) or 0
+
+            elif d.get("status") == "finished":
+                task.progress = 100.0
+
+        return _on_progress
 
     async def get_video_info(self, url: str) -> dict:
         """VOD/클립의 메타데이터를 조회한다.
@@ -135,10 +211,11 @@ class VodEngine:
             "extract_flat": False,
         }
 
-        # 쿠키 주입
-        cookies = self._auth.get_cookies()
-        if cookies:
-            opts["http_headers"] = {"Cookie": cookies.to_cookie_string()}
+        # 치지직 URL인 경우에만 쿠키 주입
+        if self._is_chzzk_url(url):
+            cookies = self._auth.get_cookies()
+            if cookies:
+                opts["http_headers"] = {"Cookie": cookies.to_cookie_string()}
 
         def _extract() -> dict[str, Any] | None:
             import yt_dlp
@@ -174,126 +251,567 @@ class VodEngine:
         output_dir: Optional[str] = None,
         quality: str = "best",
     ) -> str:
-        """VOD/클립을 다운로드한다.
+        """VOD/클립 다운로드를 시작한다.
 
         Args:
-            url: 치지직 VOD 또는 클립 URL.
+            url: 치지직 VOD/클립 URL 또는 유튜브 등 yt-dlp 지원 사이트 URL.
             output_dir: 저장 디렉토리.
             quality: 화질 ('best', 'worst', 또는 format_id).
 
         Returns:
-            다운로드된 파일 경로.
+            task_id (작업 추적용 UUID).
         """
-        import yt_dlp
-
         settings = get_settings()
         save_dir = output_dir or settings.download_dir
         Path(save_dir).mkdir(parents=True, exist_ok=True)
 
-        opts = self._build_ytdlp_options(
-            output_dir=save_dir,
+        # 새 작업 생성
+        task = VodDownloadTask(
+            url=url,
             quality=quality,
-            progress_callback=self._on_progress,
+            output_dir=save_dir,
+            state=VodDownloadState.IDLE,
         )
 
-        # 제어 플래그 초기화
-        self._cancel_flag = False
-        self._pause_event.set()
-        self._state = VodDownloadState.DOWNLOADING
-        self._progress = 0.0
-        logger.info(f"VOD 다운로드 시작: {url} (화질: {quality})")
+        # 새 작업을 맨 앞에 추가 (최신 항목이 위로)
+        new_tasks = {task.task_id: task}
+        new_tasks.update(self._tasks)
+        self._tasks = new_tasks
+
+        # 백그라운드에서 다운로드 시작
+        task.download_task = asyncio.create_task(self._run_download(task.task_id))
+
+        logger.info(f"[{task.task_id}] VOD 다운로드 작업 추가: {url} (화질: {quality})")
+        return task.task_id
+
+    async def _run_download(self, task_id: str) -> None:
+        """실제 다운로드 실행 (세마포어로 동시 실행 제어)."""
+        async with self._semaphore:  # 동시 다운로드 제한
+            task = self._tasks.get(task_id)
+            if not task:
+                logger.error(f"[{task_id}] 작업을 찾을 수 없습니다.")
+                return
+
+            task.state = VodDownloadState.DOWNLOADING
+            task.started_at = datetime.now()
+            logger.info(f"[{task_id}] 다운로드 시작: {task.url}")
+
+            # URL 타입 감지: 클립인지 VOD인지 판별
+            is_clip = "/clips/" in task.url
+
+            try:
+                if is_clip:
+                    # 클립 다운로드 (Streamlink + FFmpeg 사용)
+                    await self._download_clip(task_id, task)
+                else:
+                    # VOD 다운로드 (yt-dlp 사용)
+                    await self._download_vod(task_id, task)
+
+            except DownloadCancelledError:
+                task.state = VodDownloadState.IDLE
+                task.progress = 0.0
+                logger.info(f"[{task_id}] 다운로드 취소됨: {task.url}")
+
+                # 취소 시 .part 파일 정리
+                if task.expected_part_file and Path(task.expected_part_file).exists():
+                    try:
+                        Path(task.expected_part_file).unlink()
+                        logger.info(f"[{task_id}] .part 파일 삭제: {task.expected_part_file}")
+                    except Exception as e:
+                        logger.warning(f"[{task_id}] .part 파일 정리 실패: {e}")
+
+            except Exception as e:
+                # yt-dlp 내부에서 DownloadCancelledError를 DownloadError로 감싸는 경우 대응
+                if task.cancel_flag:
+                    task.state = VodDownloadState.IDLE
+                    task.progress = 0.0
+                    logger.info(f"[{task_id}] 다운로드 취소됨 (예외 처리): {task.url}")
+
+                    # .part 파일 정리
+                    if task.expected_part_file and Path(task.expected_part_file).exists():
+                        try:
+                            Path(task.expected_part_file).unlink()
+                            logger.info(f"[{task_id}] .part 파일 삭제: {task.expected_part_file}")
+                        except Exception as cleanup_err:
+                            logger.warning(f"[{task_id}] .part 파일 정리 실패: {cleanup_err}")
+                else:
+                    import traceback
+                    task.retry_count += 1
+
+                    # 재시도 가능 여부 확인
+                    if task.retry_count < task.max_retries:
+                        logger.warning(
+                            f"[{task_id}] 다운로드 실패 (재시도 {task.retry_count}/{task.max_retries}): {e}"
+                        )
+                        task.error_message = f"재시도 중... ({task.retry_count}/{task.max_retries}): {str(e)}"
+
+                        # 일시적 오류일 가능성이 있으므로 잠시 대기 후 재시도
+                        await asyncio.sleep(3 * task.retry_count)  # 백오프: 3초, 6초, 9초...
+
+                        # 진행률 초기화 후 재시도
+                        task.progress = 0.0
+                        task.download_speed = 0.0
+                        task.downloaded_bytes = 0
+
+                        # 재귀적으로 재시도
+                        return await self._run_download(task_id)
+                    else:
+                        # 최대 재시도 횟수 초과
+                        task.state = VodDownloadState.ERROR
+                        task.error_message = f"재시도 {task.max_retries}회 실패: {str(e)}"
+                        logger.error(f"[{task_id}] 최대 재시도 횟수 초과: {e}")
+                        logger.error(f"[{task_id}] 상세 트레이스:\n{traceback.format_exc()}")
+                        # 에러 발생 시 이력 저장
+                        self._save_history()
+
+    async def _download_vod(self, task_id: str, task: VodDownloadTask) -> None:
+        """yt-dlp를 사용한 VOD 다운로드."""
+        import yt_dlp
+
+        # 1. 먼저 메타데이터 추출 (파일명 미리 확보)
+        opts_info = self._build_ytdlp_options(task, progress_callback=None)
+
+        def _extract_info() -> dict[str, Any] | None:
+            with yt_dlp.YoutubeDL(opts_info) as ydl:
+                return ydl.extract_info(task.url, download=False)
+
+        info: dict[str, Any] | None = await asyncio.to_thread(lambda: _extract_info())  # type: ignore[arg-type]
+
+        if not info:
+            raise RuntimeError("영상 정보를 가져올 수 없습니다.")
+
+        # VOD 메타데이터: [채널명] 제목 형식
+        vod_title = info.get("title", "Unknown")
+        uploader = info.get("uploader") or info.get("channel") or "Unknown Channel"
+        task.title = f"[{uploader}] {vod_title}"
+        logger.info(f"[{task_id}] VOD 메타데이터: {task.title}")
+
+        # 예상 파일명 저장 (.part 파일 정리용)
+        with yt_dlp.YoutubeDL(opts_info) as ydl:
+            expected_file = ydl.prepare_filename(info)
+            task.expected_part_file = expected_file + ".part"
+
+        # 2. 실제 다운로드 (진행률 콜백 포함)
+        opts = self._build_ytdlp_options(
+            task,
+            progress_callback=self._make_progress_callback(task),
+        )
+
+        def _download() -> str | None:
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                ydl.extract_info(task.url, download=True)
+                return expected_file
+
+        filepath: str | None = await asyncio.to_thread(lambda: _download())  # type: ignore[arg-type]
+
+        if filepath:
+            task.state = VodDownloadState.COMPLETED
+            task.completed_at = datetime.now()
+            task.output_path = filepath
+            logger.info(f"[{task_id}] VOD 다운로드 완료: {filepath}")
+            # 완료 시 이력 저장
+            self._save_history()
+        else:
+            task.state = VodDownloadState.ERROR
+            task.error_message = "다운로드 결과를 확인할 수 없습니다."
+            logger.error(f"[{task_id}] {task.error_message}")
+            # 에러 시 이력 저장
+            self._save_history()
+
+    async def _download_clip(self, task_id: str, task: VodDownloadTask) -> None:
+        """Streamlink + FFmpeg를 사용한 클립 다운로드."""
+        from app.engine.pipeline import FFmpegPipeline
+
+        settings = get_settings()
+
+        # Streamlink로 클립 스트림 및 메타데이터 가져오기
+        def _get_streams() -> dict[str, Any]:
+            import streamlink
+            from streamlink.plugins.chzzk import Chzzk
+
+            session = streamlink.Streamlink()
+            sl_options = self._auth.get_streamlink_options()
+            for key, value in sl_options.items():
+                session.set_option(key, value)
+
+            # Chzzk 플러그인 인스턴스 직접 생성
+            plugin = Chzzk(session, task.url)
+
+            # 플러그인의 streams() 메서드를 직접 호출
+            streams = plugin.streams()
+            if not streams:
+                raise RuntimeError("클립 스트림을 찾을 수 없습니다.")
+
+            # 플러그인에서 메타데이터 가져오기 (streams() 호출 후 설정됨)
+            clip_title = getattr(plugin, 'title', None) or "Unknown Clip"
+            channel_name = getattr(plugin, 'author', None) or "Unknown Channel"
+
+            logger.info(f"[{task_id}] 클립 제목: {clip_title}, 채널: {channel_name}")
+
+            return {
+                "streams": streams,
+                "clip_title": clip_title,
+                "channel_name": channel_name
+            }
+
+        stream_data: dict[str, Any] = await asyncio.to_thread(_get_streams)
+        streams = stream_data["streams"]
+
+        # UI 표시용 제목 설정 (채널명 + 클립제목)
+        task.title = f'[{stream_data["channel_name"]}] {stream_data["clip_title"]}'
+        logger.info(f"[{task_id}] 클립 메타데이터: {task.title}")
+
+        # 화질 선택
+        stream = streams.get(task.quality) or streams.get("best")
+        if not stream:
+            raise RuntimeError(f"화질 '{task.quality}'를 찾을 수 없습니다.")
+
+        # FFmpeg로 다운로드
+        # 파일명 생성: [채널명].{ext}
+        ext = settings.output_format or "mp4"
+        channel_name_clean = self._clean_filename(stream_data["channel_name"])
+        filename = f"[{channel_name_clean}].{ext}"
+        output_file = Path(task.output_dir) / filename
+        task.expected_part_file = str(output_file) + ".part"
+
+        logger.info(f"[{task_id}] 클립 다운로드: {task.url} -> {output_file}")
+
+        # FFmpeg 파이프라인 생성 및 시작
+        pipeline = FFmpegPipeline(channel_id=task_id)
+        await pipeline.start_recording(
+            stream_obj=stream,
+            output_dir=task.output_dir,
+            filename=filename,
+        )
+
+        # 진행률 모니터링 (파일 크기 기반)
+        while pipeline.state.value == "recording":
+            if task.cancel_flag:
+                await pipeline.stop_recording()
+                raise DownloadCancelledError("사용자에 의해 취소되었습니다.")
+
+            # 일시정지 체크
+            task.pause_event.wait()
+
+            # 파일 크기 기반 진행률 추정 (완전한 추정이 불가능하므로 대략적으로)
+            if output_file.exists():
+                file_size_mb = output_file.stat().st_size / (1024 * 1024)
+                # 임의로 100MB를 100%로 가정 (클립은 보통 짧음)
+                task.progress = min((file_size_mb / 100) * 100, 99.0)
+
+            await asyncio.sleep(2)
+
+        # 완료 확인
+        if pipeline.state.value == "completed" and output_file.exists():
+            task.state = VodDownloadState.COMPLETED
+            task.completed_at = datetime.now()
+            task.output_path = str(output_file)
+            task.progress = 100.0
+            logger.info(f"[{task_id}] 클립 다운로드 완료: {output_file}")
+            # 완료 시 이력 저장
+            self._save_history()
+        else:
+            raise RuntimeError(f"FFmpeg 파이프라인 오류: {pipeline.state.value}")
+
+    def _clean_filename(self, name: str) -> str:
+        """파일명에서 사용할 수 없는 특수문자를 제거한다."""
+        import re
+        cleaned = re.sub(r'[\\/:*?"<>|]', "_", name)
+        cleaned = cleaned.strip()
+        return cleaned[:100]  # 길이 제한
+
+    def cancel_download(self, task_id: str) -> dict[str, Any]:
+        """특정 다운로드를 취소한다."""
+        task = self._tasks.get(task_id)
+        if not task:
+            return {"error": "작업을 찾을 수 없습니다.", "task_id": task_id}
+
+        if task.state not in (VodDownloadState.DOWNLOADING, VodDownloadState.PAUSED):
+            return {
+                "error": "취소할 다운로드가 없습니다.",
+                "state": task.state.value,
+                "task_id": task_id,
+            }
+
+        logger.info(f"[{task_id}] 다운로드 취소 요청...")
+        task.cancel_flag = True
+        task.state = VodDownloadState.CANCELLING
+        # 일시정지 중이면 해제해서 취소가 진행되도록
+        task.pause_event.set()
+        return {
+            "message": "다운로드 취소 요청됨.",
+            "state": task.state.value,
+            "task_id": task_id,
+        }
+
+    def pause_download(self, task_id: str) -> dict[str, Any]:
+        """특정 다운로드를 일시정지한다."""
+        task = self._tasks.get(task_id)
+        if not task:
+            return {"error": "작업을 찾을 수 없습니다.", "task_id": task_id}
+
+        if task.state != VodDownloadState.DOWNLOADING:
+            return {
+                "error": "일시정지할 다운로드가 없습니다.",
+                "state": task.state.value,
+                "task_id": task_id,
+            }
+
+        logger.info(f"[{task_id}] 다운로드 일시정지 요청...")
+        task.pause_event.clear()  # progress callback에서 blocking
+        task.state = VodDownloadState.PAUSED
+        return {
+            "message": "다운로드가 일시정지되었습니다.",
+            "state": task.state.value,
+            "task_id": task_id,
+        }
+
+    def resume_download(self, task_id: str) -> dict[str, Any]:
+        """일시정지된 다운로드를 재개한다."""
+        task = self._tasks.get(task_id)
+        if not task:
+            return {"error": "작업을 찾을 수 없습니다.", "task_id": task_id}
+
+        if task.state != VodDownloadState.PAUSED:
+            return {
+                "error": "재개할 다운로드가 없습니다.",
+                "state": task.state.value,
+                "task_id": task_id,
+            }
+
+        logger.info(f"[{task_id}] 다운로드 재개 요청...")
+        task.pause_event.set()  # progress callback 해제
+        task.state = VodDownloadState.DOWNLOADING
+        return {
+            "message": "다운로드가 재개되었습니다.",
+            "state": task.state.value,
+            "task_id": task_id,
+        }
+
+    async def retry_download(self, task_id: str) -> str:
+        """완료/에러 상태의 작업을 재다운로드한다."""
+        old_task = self._tasks.get(task_id)
+        if not old_task:
+            raise ValueError("작업을 찾을 수 없습니다.")
+
+        if old_task.state not in (VodDownloadState.COMPLETED, VodDownloadState.ERROR):
+            raise ValueError(f"재다운로드는 완료 또는 에러 상태에서만 가능합니다. 현재 상태: {old_task.state.value}")
+
+        logger.info(f"[{task_id}] 재다운로드 요청 - URL: {old_task.url}, 화질: {old_task.quality}")
+
+        # 기존 작업 정보를 기반으로 새 다운로드 시작
+        new_task_id = await self.download(
+            url=old_task.url,
+            output_dir=old_task.output_dir,
+            quality=old_task.quality,
+        )
+
+        logger.info(f"[{task_id}] → 새 작업 생성: {new_task_id}")
+        return new_task_id
+
+    def get_task_status(self, task_id: str) -> dict[str, Any]:
+        """특정 작업의 상태를 반환한다."""
+        task = self._tasks.get(task_id)
+        if not task:
+            return {"error": "작업을 찾을 수 없습니다.", "task_id": task_id}
+
+        return {
+            "task_id": task.task_id,
+            "url": task.url,
+            "title": task.title,
+            "state": task.state.value,
+            "progress": round(task.progress, 1),
+            "quality": task.quality,
+            "output_path": task.output_path,
+            "error_message": task.error_message,
+            "created_at": task.created_at.isoformat(),
+            "started_at": task.started_at.isoformat() if task.started_at else None,
+            "completed_at": task.completed_at.isoformat() if task.completed_at else None,
+            # 다운로드 통계
+            "download_speed": round(task.download_speed, 2),  # MB/s
+            "downloaded_bytes": task.downloaded_bytes,
+            "total_bytes": task.total_bytes,
+            "eta_seconds": task.eta_seconds,
+        }
+
+    def list_all_tasks(self) -> list[dict[str, Any]]:
+        """모든 작업 목록을 반환한다."""
+        return [self.get_task_status(tid) for tid in self._tasks.keys()]
+
+    def reorder_tasks(self, task_ids: list[str]) -> dict[str, Any]:
+        """작업 순서를 재정렬한다.
+
+        Args:
+            task_ids: 새로운 순서대로 정렬된 task_id 리스트
+
+        Returns:
+            성공 메시지 또는 에러
+        """
+        # 모든 task_id가 유효한지 확인
+        for tid in task_ids:
+            if tid not in self._tasks:
+                return {"error": f"존재하지 않는 작업 ID: {tid}"}
+
+        # 제공된 task_ids와 현재 tasks의 개수가 일치하는지 확인
+        if len(task_ids) != len(self._tasks):
+            return {
+                "error": f"작업 개수 불일치: 제공={len(task_ids)}, 현재={len(self._tasks)}"
+            }
+
+        # 새로운 순서로 재정렬
+        new_tasks: dict[str, VodDownloadTask] = {}
+        for tid in task_ids:
+            new_tasks[tid] = self._tasks[tid]
+
+        self._tasks = new_tasks
+        logger.info(f"작업 순서 재정렬 완료: {len(task_ids)}개")
+
+        return {"message": "작업 순서가 변경되었습니다.", "count": len(task_ids)}
+
+    def clear_completed_tasks(self) -> dict[str, Any]:
+        """완료 및 에러 상태의 작업들을 일괄 삭제한다.
+
+        Returns:
+            삭제된 작업 개수 및 메시지
+        """
+        before_count = len(self._tasks)
+
+        # 완료/에러 상태가 아닌 작업만 남김
+        active_tasks = {
+            tid: task
+            for tid, task in self._tasks.items()
+            if task.state not in (VodDownloadState.COMPLETED, VodDownloadState.ERROR)
+        }
+
+        deleted_count = before_count - len(active_tasks)
+        self._tasks = active_tasks
+
+        logger.info(f"완료된 작업 정리: {deleted_count}개 삭제됨")
+
+        return {
+            "message": f"{deleted_count}개의 완료된 작업이 삭제되었습니다.",
+            "deleted_count": deleted_count,
+            "remaining_count": len(active_tasks),
+        }
+
+    def open_file_location(self, task_id: str) -> dict[str, Any]:
+        """작업의 출력 파일 위치를 탐색기로 엽니다.
+
+        Args:
+            task_id: 작업 ID
+
+        Returns:
+            성공/실패 메시지
+        """
+        task = self._tasks.get(task_id)
+        if not task:
+            return {"error": "작업을 찾을 수 없습니다."}
+
+        if not task.output_path:
+            return {"error": "출력 파일 경로가 없습니다."}
+
+        output_file = Path(task.output_path)
+        if not output_file.exists():
+            return {"error": "파일이 존재하지 않습니다."}
+
+        # OS별로 파일 탐색기 열기
+        import platform
+        import subprocess
 
         try:
-            def _download() -> str | None:
-                with yt_dlp.YoutubeDL(opts) as ydl:
-                    info = ydl.extract_info(url, download=True)
-                    if info:
-                        self._current_title = info.get("title", "Unknown")
-                        return ydl.prepare_filename(info)
-                    return None
+            system = platform.system()
+            if system == "Windows":
+                # Windows: explorer /select,"파일경로"
+                subprocess.run(["explorer", "/select,", str(output_file)], check=False)
+            elif system == "Darwin":  # macOS
+                # macOS: open -R "파일경로"
+                subprocess.run(["open", "-R", str(output_file)], check=False)
+            else:  # Linux
+                # Linux: xdg-open "폴더경로"
+                subprocess.run(["xdg-open", str(output_file.parent)], check=False)
 
-            filepath: str | None = await asyncio.to_thread(lambda: _download())  # type: ignore[arg-type]
-
-            if filepath:
-                self._state = VodDownloadState.COMPLETED
-                logger.info(f"VOD 다운로드 완료: {filepath}")
-                return filepath
-            else:
-                self._state = VodDownloadState.ERROR
-                raise RuntimeError("다운로드 결과를 확인할 수 없습니다.")
-
-        except DownloadCancelledError:
-            self._state = VodDownloadState.IDLE
-            self._progress = 0.0
-            logger.info(f"VOD 다운로드 취소됨: {url}")
-
-            # 취소 시 .part 파일 정리 (설정에 따름)
-            if not settings.keep_download_parts:
-                try:
-                    # yt-dlp가 생성했을 법한 .part 파일 찾아서 삭제
-                    # (정확한 파일명을 알기 어려우므로 패턴 매칭 시도)
-                    if self._current_title:
-                        # 파일명에 title이 포함된 .part 파일 검색
-                        # 주의: 정확한 파일명 매칭은 어렵지만, 가장 최근 수정된 파일을 타겟팅할 수 있음
-                        # 여기서는 간단히 로그만 남기고, yt-dlp의 'cleanup' 옵션을 믿거나
-                        # 추후 정확한 파일명 추적 로직이 필요할 수 있음.
-                        # 현 단계에서는 yt-dlp가 취소 시 자동으로 지우지 않는 경우를 대비해
-                        # 다운로드 시작 시 반환된 filename 템플릿을 활용하는 것이 가장 좋으나
-                        # _download 내부에서 filename이 결정되므로, 외부에서 알기 어려움.
-                        # 대안: prepare_filename을 먼저 호출해서 파일명을 미리 확보하는 구조로 변경 필요.
-                        pass
-                except Exception as e:
-                    logger.warning(f"임시 파일 정리 실패: {e}")
-
-            return ""
+            logger.info(f"[{task_id}] 파일 위치 열기: {output_file}")
+            return {"message": "파일 위치를 열었습니다.", "path": str(output_file)}
 
         except Exception as e:
-            # yt-dlp 내부에서 DownloadCancelledError를 DownloadError로 감싸는 경우 대응
-            if self._cancel_flag:
-                self._state = VodDownloadState.IDLE
-                self._progress = 0.0
-                logger.info(f"VOD 다운로드 취소됨: {url}")
-                return ""
-            self._state = VodDownloadState.ERROR
-            logger.error(f"VOD 다운로드 실패: {e}")
-            raise
-
-    def cancel_download(self) -> dict[str, Any]:
-        """진행 중인 다운로드를 취소한다."""
-        if self._state not in (VodDownloadState.DOWNLOADING, VodDownloadState.PAUSED):
-            return {"error": "취소할 다운로드가 없습니다.", "state": self._state.value}
-
-        logger.info("VOD 다운로드 취소 요청...")
-        self._cancel_flag = True
-        self._state = VodDownloadState.CANCELLING
-        # 일시정지 중이면 해제해서 취소가 진행되도록
-        self._pause_event.set()
-        return {"message": "다운로드 취소 요청됨.", "state": self._state.value}
-
-    def pause_download(self) -> dict[str, Any]:
-        """진행 중인 다운로드를 일시정지한다."""
-        if self._state != VodDownloadState.DOWNLOADING:
-            return {"error": "일시정지할 다운로드가 없습니다.", "state": self._state.value}
-
-        logger.info("VOD 다운로드 일시정지 요청...")
-        self._pause_event.clear()  # progress callback에서 blocking
-        self._state = VodDownloadState.PAUSED
-        return {"message": "다운로드가 일시정지되었습니다.", "state": self._state.value}
-
-    def resume_download(self) -> dict[str, Any]:
-        """일시정지된 다운로드를 재개한다."""
-        if self._state != VodDownloadState.PAUSED:
-            return {"error": "재개할 다운로드가 없습니다.", "state": self._state.value}
-
-        logger.info("VOD 다운로드 재개 요청...")
-        self._pause_event.set()  # progress callback 해제
-        self._state = VodDownloadState.DOWNLOADING
-        return {"message": "다운로드가 재개되었습니다.", "state": self._state.value}
+            logger.error(f"[{task_id}] 파일 위치 열기 실패: {e}")
+            return {"error": f"파일 위치를 열 수 없습니다: {str(e)}"}
 
     def get_status(self) -> dict[str, Any]:
-        """현재 다운로드 상태 반환."""
+        """하위 호환성을 위한 메서드. 첫 번째 작업의 상태 반환."""
+        if not self._tasks:
+            return {
+                "state": VodDownloadState.IDLE.value,
+                "progress": 0.0,
+                "title": None,
+            }
+
+        first_task = next(iter(self._tasks.values()))
         return {
-            "state": self._state.value,
-            "progress": round(float(self._progress), 1),  # type: ignore[call-overload]
-            "title": self._current_title,
+            "state": first_task.state.value,
+            "progress": round(first_task.progress, 1),
+            "title": first_task.title,
         }
+
+    def _load_history(self) -> None:
+        """이력 파일에서 완료된 작업을 불러온다."""
+        if not self._history_file.exists():
+            return
+
+        try:
+            with open(self._history_file, "r", encoding="utf-8") as f:
+                history_data = json.load(f)
+
+            for task_data in history_data:
+                # 완료/에러 상태의 작업만 복원
+                if task_data.get("state") in ["completed", "error"]:
+                    task = VodDownloadTask(
+                        task_id=task_data["task_id"],
+                        url=task_data["url"],
+                        title=task_data["title"],
+                        state=VodDownloadState(task_data["state"]),
+                        progress=task_data["progress"],
+                        quality=task_data.get("quality", "best"),
+                        output_dir=task_data.get("output_dir", ""),
+                        output_path=task_data.get("output_path"),
+                        error_message=task_data.get("error_message"),
+                        created_at=datetime.fromisoformat(task_data["created_at"]),
+                        started_at=datetime.fromisoformat(task_data["started_at"]) if task_data.get("started_at") else None,
+                        completed_at=datetime.fromisoformat(task_data["completed_at"]) if task_data.get("completed_at") else None,
+                    )
+                    self._tasks[task.task_id] = task
+
+            logger.info(f"VOD 다운로드 이력 로드 완료: {len(history_data)}개")
+        except Exception as e:
+            logger.warning(f"VOD 이력 로드 실패: {e}")
+
+    def _save_history(self) -> None:
+        """완료/에러 상태의 작업을 이력 파일에 저장한다."""
+        try:
+            self._history_file.parent.mkdir(parents=True, exist_ok=True)
+
+            history_data = []
+            for task in self._tasks.values():
+                # 완료되거나 에러가 난 작업만 저장
+                if task.state in (VodDownloadState.COMPLETED, VodDownloadState.ERROR):
+                    history_data.append({
+                        "task_id": task.task_id,
+                        "url": task.url,
+                        "title": task.title,
+                        "state": task.state.value,
+                        "progress": task.progress,
+                        "quality": task.quality,
+                        "output_dir": task.output_dir,
+                        "output_path": task.output_path,
+                        "error_message": task.error_message,
+                        "created_at": task.created_at.isoformat(),
+                        "started_at": task.started_at.isoformat() if task.started_at else None,
+                        "completed_at": task.completed_at.isoformat() if task.completed_at else None,
+                    })
+
+            with open(self._history_file, "w", encoding="utf-8") as f:
+                json.dump(history_data, f, ensure_ascii=False, indent=2)
+
+            logger.debug(f"VOD 다운로드 이력 저장 완료: {len(history_data)}개")
+        except Exception as e:
+            logger.warning(f"VOD 이력 저장 실패: {e}")

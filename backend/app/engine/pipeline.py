@@ -43,6 +43,13 @@ class FFmpegPipeline:
         self._feeder_task: Optional[asyncio.Task] = None
         self._stream_fd = None
 
+        # 녹화 통계
+        self._file_size_bytes: int = 0  # 현재 파일 크기 (바이트)
+        self._download_speed: float = 0.0  # 다운로드 속도 (MB/s)
+        self._bitrate: float = 0.0  # 비트레이트 (kbps)
+        self._last_size: int = 0  # 이전 파일 크기
+        self._last_check_time: Optional[datetime] = None  # 마지막 체크 시간
+
     @property
     def state(self) -> RecordingState:
         return self._state
@@ -62,6 +69,86 @@ class FFmpegPipeline:
         if start is None:
             return 0.0
         return (datetime.now() - start).total_seconds()
+
+    @property
+    def file_size_bytes(self) -> int:
+        """현재 파일 크기 (바이트)."""
+        return self._file_size_bytes
+
+    @property
+    def download_speed(self) -> float:
+        """다운로드 속도 (MB/s)."""
+        return self._download_speed
+
+    @property
+    def bitrate(self) -> float:
+        """비트레이트 (kbps)."""
+        return self._bitrate
+
+    def _update_statistics(self) -> None:
+        """녹화 통계를 업데이트한다."""
+        if not self._output_path:
+            logger.debug(f"[{self._channel_id}] 통계 업데이트: output_path가 없음")
+            return
+
+        output_file = Path(self._output_path)
+        if not output_file.exists():
+            logger.debug(f"[{self._channel_id}] 통계 업데이트: 파일이 아직 생성되지 않음")
+            return
+
+        try:
+            current_size = output_file.stat().st_size
+            self._file_size_bytes = current_size
+
+            now = datetime.now()
+            if self._last_check_time is not None:
+                elapsed = (now - self._last_check_time).total_seconds()
+                if elapsed > 0:
+                    size_diff = current_size - self._last_size
+
+                    # 파일 크기가 증가했을 때만 속도/비트레이트 업데이트
+                    # (FFmpeg 버퍼링으로 인해 일시적으로 크기가 안 늘어날 수 있음)
+                    if size_diff > 0:
+                        # 속도 (bytes/s → MB/s)
+                        self._download_speed = (size_diff / elapsed) / (1024 * 1024)
+
+                        # 비트레이트 (bits/s → kbps)
+                        self._bitrate = (size_diff * 8 / elapsed) / 1000
+
+                        logger.debug(
+                            f"[{self._channel_id}] 통계 업데이트: "
+                            f"size={current_size}, speed={self._download_speed:.2f}MB/s, "
+                            f"bitrate={self._bitrate:.0f}kbps"
+                        )
+                    # size_diff == 0인 경우 이전 값 유지 (로그 생략)
+
+            self._last_size = current_size
+            self._last_check_time = now
+
+        except Exception as e:
+            logger.error(f"[{self._channel_id}] 통계 업데이트 실패: {e}")
+
+    async def _update_statistics_loop(self) -> None:
+        """녹화 중 통계를 주기적으로 업데이트한다."""
+        try:
+            logger.info(f"[{self._channel_id}] 통계 업데이트 루프 시작")
+
+            # 파일이 생성될 때까지 최대 10초 대기
+            for _ in range(10):
+                if self._output_path and Path(self._output_path).exists():
+                    logger.info(f"[{self._channel_id}] 녹화 파일 생성 확인: {self._output_path}")
+                    break
+                await asyncio.sleep(1.0)
+
+            while self._state == RecordingState.RECORDING:
+                self._update_statistics()
+                await asyncio.sleep(2.0)  # 2초마다 업데이트
+
+            logger.info(f"[{self._channel_id}] 통계 업데이트 루프 종료")
+        except asyncio.CancelledError:
+            logger.info(f"[{self._channel_id}] 통계 업데이트 루프 취소됨")
+        except Exception as e:
+            logger.error(f"[{self._channel_id}] 통계 업데이트 루프 오류: {e}")
 
     async def start_recording(
         self,
@@ -94,12 +181,12 @@ class FFmpegPipeline:
         save_dir.mkdir(parents=True, exist_ok=True)
 
         if not filename:
-            # 2026_02_10_1726_스트리머_제목.{format} 형식
+            # [채널이름] 2026-02-11 19：01 방송제목.{format} 형식
             now = datetime.now()
-            ts_str = now.strftime("%Y_%m_%d_%H：%M")
+            ts_str = now.strftime("%Y-%m-%d %H：%M")
             ext = settings.output_format or "ts"
 
-            raw_name = f"{ts_str}_{streamer_name or self._channel_id}_{title or 'live'}"
+            raw_name = f"[{streamer_name or self._channel_id}] {ts_str} {title or 'live'}"
             filename = self._clean_filename(raw_name) + f".{ext}"
 
         output_file = save_dir / filename
@@ -158,6 +245,9 @@ class FFmpegPipeline:
 
             # 백그라운드에서 프로세스 종료 감시
             asyncio.create_task(self._watch_process())
+
+            # 백그라운드에서 통계 업데이트
+            asyncio.create_task(self._update_statistics_loop())
 
             return self._output_path or ""
 
@@ -308,6 +398,10 @@ class FFmpegPipeline:
             "output_path": self._output_path,
             "duration_seconds": round(float(self.duration_seconds), 1),  # pyre-ignore[6]: Pyre2 round overload bug
             "start_time": start.isoformat() if start is not None else None,
+            # 녹화 통계
+            "file_size_bytes": self._file_size_bytes,
+            "download_speed": round(self._download_speed, 2),  # MB/s
+            "bitrate": round(self._bitrate, 1),  # kbps
         }
 
     def _clean_filename(self, name: str) -> str:

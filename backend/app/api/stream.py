@@ -28,21 +28,32 @@ async def add_channel(req: AddChannelRequest):
     from app.main import get_recorder_service
 
     service = get_recorder_service()
-    
-    # URL에서 채널 ID 추출 (https://chzzk.naver.com/live/HASH_ID)
+
+    # URL에서 채널 ID 추출 (다양한 형식 지원)
+    # 1. https://chzzk.naver.com/live/CHANNEL_ID
+    # 2. https://chzzk.naver.com/CHANNEL_ID
+    # 3. CHANNEL_ID (순수 ID)
     channel_id = req.channel_id.strip()
-    if "chzzk.naver.com/live/" in channel_id:
-        channel_id = channel_id.split("chzzk.naver.com/live/")[-1].split("/")[0]
-        
+    if "chzzk.naver.com/" in channel_id:
+        # URL에서 마지막 경로 세그먼트 추출
+        channel_id = channel_id.rstrip("/").split("/")[-1]
+        # 쿼리 파라미터 제거
+        channel_id = channel_id.split("?")[0]
+
     return service.add_channel(channel_id, req.auto_record)
 
 
-@router.delete("/channels/{channel_id}", summary="채널 제거")
+@router.delete("/channels/{channel_id:path}", summary="채널 제거")
 async def remove_channel(channel_id: str):
     """채널을 감시 목록에서 제거합니다."""
     from app.main import get_recorder_service
 
     service = get_recorder_service()
+
+    # URL 형식으로 들어온 경우 채널 ID 추출
+    if "chzzk.naver.com/" in channel_id:
+        channel_id = channel_id.rstrip("/").split("/")[-1].split("?")[0]
+
     return await service.remove_channel(channel_id)
 
 
@@ -55,12 +66,17 @@ async def list_channels():
     return service.get_channels()
 
 
-@router.patch("/channels/{channel_id}/auto-record", summary="자동 녹화 토글")
+@router.patch("/channels/{channel_id:path}/auto-record", summary="자동 녹화 토글")
 async def toggle_auto_record(channel_id: str):
     """채널의 자동 녹화 설정을 ON/OFF 토글합니다."""
     from app.main import get_recorder_service
 
     service = get_recorder_service()
+
+    # URL 형식으로 들어온 경우 채널 ID 추출
+    if "chzzk.naver.com/" in channel_id:
+        channel_id = channel_id.rstrip("/").split("/")[-1].split("?")[0]
+
     try:
         return service.toggle_auto_record(channel_id)
     except ValueError as e:
@@ -69,24 +85,34 @@ async def toggle_auto_record(channel_id: str):
 
 # ── 녹화 제어 ────────────────────────────────────────────
 
-@router.post("/record/{channel_id}/start", summary="수동 녹화 시작")
+@router.post("/record/{channel_id:path}/start", summary="수동 녹화 시작")
 async def start_recording(channel_id: str):
     """특정 채널의 녹화를 수동으로 시작합니다."""
     from app.main import get_recorder_service
 
     service = get_recorder_service()
+
+    # URL 형식으로 들어온 경우 채널 ID 추출
+    if "chzzk.naver.com/" in channel_id:
+        channel_id = channel_id.rstrip("/").split("/")[-1].split("?")[0]
+
     try:
         return await service.start_recording(channel_id)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/record/{channel_id}/stop", summary="녹화 중지")
+@router.post("/record/{channel_id:path}/stop", summary="녹화 중지")
 async def stop_recording(channel_id: str):
     """특정 채널의 녹화를 중지합니다."""
     from app.main import get_recorder_service
 
     service = get_recorder_service()
+
+    # URL 형식으로 들어온 경우 채널 ID 추출
+    if "chzzk.naver.com/" in channel_id:
+        channel_id = channel_id.rstrip("/").split("/")[-1].split("?")[0]
+
     try:
         return await service.stop_recording(channel_id)
     except Exception as e:

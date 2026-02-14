@@ -40,6 +40,13 @@ export default function Settings() {
     const [genSaving, setGenSaving] = useState(false);
     const [genMsg, setGenMsg] = useState<Toast | null>(null);
 
+    // ── VOD settings state ──
+    const [vodMaxConcurrent, setVodMaxConcurrent] = useState(3);
+    const [vodDefaultQuality, setVodDefaultQuality] = useState("best");
+    const [vodMaxSpeed, setVodMaxSpeed] = useState(0);
+    const [vodSaving, setVodSaving] = useState(false);
+    const [vodMsg, setVodMsg] = useState<Toast | null>(null);
+
     useEffect(() => {
         loadSettings();
     }, []);
@@ -54,6 +61,9 @@ export default function Settings() {
             setMonitorInterval(data.monitor_interval);
             setOutputFormat(data.output_format || "ts");
             setRecordingQuality(data.recording_quality || "best");
+            setVodMaxConcurrent(data.vod_max_concurrent);
+            setVodDefaultQuality(data.vod_default_quality);
+            setVodMaxSpeed(data.vod_max_speed);
         } catch (e) {
             console.error(e);
         }
@@ -128,6 +138,28 @@ export default function Settings() {
             });
         } finally {
             setGenSaving(false);
+        }
+    };
+
+    // ── VOD settings save ──
+    const handleSaveVodSettings = async () => {
+        setVodSaving(true);
+        setVodMsg(null);
+        try {
+            await api.updateVodSettings({
+                vod_max_concurrent: vodMaxConcurrent,
+                vod_default_quality: vodDefaultQuality,
+                vod_max_speed: vodMaxSpeed,
+            });
+            setVodMsg({ type: "success", text: "VOD 설정이 저장되었습니다." });
+            loadSettings();
+        } catch (e: any) {
+            setVodMsg({
+                type: "error",
+                text: e.response?.data?.detail || "VOD 설정 저장에 실패했습니다.",
+            });
+        } finally {
+            setVodSaving(false);
         }
     };
 
@@ -291,6 +323,87 @@ export default function Settings() {
                         </button>
 
                         <ToastBox msg={genMsg} />
+                    </div>
+
+                    {/* ── VOD Download Settings Card ── */}
+                    <div className="bg-zinc-900/50 p-6 rounded-xl border border-zinc-800 space-y-5">
+                        <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                            <Film className="w-5 h-5 text-purple-500" />
+                            VOD 다운로드 설정
+                        </h3>
+
+                        <div className="space-y-4">
+                            <div className="space-y-2">
+                                <label className="text-sm font-medium text-zinc-300 flex items-center gap-2">
+                                    <Download className="w-4 h-4" />
+                                    동시 다운로드 개수
+                                </label>
+                                <input
+                                    type="number"
+                                    className="w-full bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-purple-500"
+                                    value={vodMaxConcurrent}
+                                    onChange={(e) => setVodMaxConcurrent(Number(e.target.value))}
+                                    min={1}
+                                    max={10}
+                                />
+                                <p className="text-xs text-zinc-500">
+                                    한 번에 다운로드할 수 있는 최대 영상 개수 (1-10개)
+                                </p>
+                            </div>
+
+                            <div className="space-y-2">
+                                <label className="text-sm font-medium text-zinc-300 flex items-center gap-2">
+                                    <Gauge className="w-4 h-4" />
+                                    기본 화질
+                                </label>
+                                <Select
+                                    value={vodDefaultQuality}
+                                    onChange={setVodDefaultQuality}
+                                    options={[
+                                        { value: "best", label: "최고 화질 (Best)" },
+                                        { value: "1080p", label: "1080p" },
+                                        { value: "720p", label: "720p" },
+                                        { value: "480p", label: "480p" },
+                                    ]}
+                                />
+                                <p className="text-xs text-zinc-500">
+                                    VOD 다운로드 시 기본으로 사용할 화질
+                                </p>
+                            </div>
+
+                            <div className="space-y-2">
+                                <label className="text-sm font-medium text-zinc-300 flex items-center gap-2">
+                                    <Gauge className="w-4 h-4" />
+                                    최대 다운로드 속도 (MB/s)
+                                </label>
+                                <input
+                                    type="number"
+                                    className="w-full bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-purple-500"
+                                    value={vodMaxSpeed}
+                                    onChange={(e) => setVodMaxSpeed(Number(e.target.value))}
+                                    min={0}
+                                    max={1000}
+                                />
+                                <p className="text-xs text-zinc-500">
+                                    0 = 무제한, 네트워크 대역폭 제한 시 사용
+                                </p>
+                            </div>
+                        </div>
+
+                        <button
+                            onClick={handleSaveVodSettings}
+                            disabled={vodSaving}
+                            className="w-full bg-purple-600 hover:bg-purple-500 text-white font-bold py-2 px-4 rounded-lg transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2"
+                        >
+                            {vodSaving ? (
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : (
+                                <Save className="w-4 h-4" />
+                            )}
+                            {vodSaving ? "저장 중..." : "VOD 설정 저장"}
+                        </button>
+
+                        <ToastBox msg={vodMsg} />
                     </div>
                 </div>
 

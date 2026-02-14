@@ -55,6 +55,11 @@ class Settings(BaseSettings):
     output_format: str = "ts"          # 녹화 출력 포맷: ts, mp4, mkv
     recording_quality: str = "best"    # 녹화 품질: best, 1080p, 720p, 480p
 
+    # ── VOD 다운로드 설정 ──────────────────────────────────
+    vod_max_concurrent: int = 3        # 동시 다운로드 최대 개수
+    vod_default_quality: str = "best"  # 기본 화질: best, 1080p, 720p, 480p
+    vod_max_speed: int = 0             # 최대 다운로드 속도 (MB/s, 0 = 무제한)
+
     def resolve_ffmpeg_path(self) -> str:
         """FFmpeg 실행 파일 경로를 탐색 순서에 따라 결정한다.
 

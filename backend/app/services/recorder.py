@@ -101,38 +101,62 @@ class RecorderService:
         url: str,
         quality: str = "best",
         output_dir: Optional[str] = None,
-    ) -> dict:
-        """VOD 다운로드를 시작한다."""
+    ) -> str:
+        """VOD 다운로드를 시작한다. task_id를 반환한다."""
         logger.info(f"[Service] VOD 다운로드 요청: {url}")
-        filepath = await self._vod_engine.download(
+        task_id = await self._vod_engine.download(
             url=url,
             quality=quality,
             output_dir=output_dir,
         )
-        return {
-            "url": url,
-            "filepath": filepath,
-            "message": "다운로드 완료.",
-        }
+        return task_id
+
+    def list_vod_tasks(self) -> list[dict]:
+        """모든 VOD 다운로드 작업 목록을 반환한다."""
+        return self._vod_engine.list_all_tasks()
+
+    def get_vod_task_status(self, task_id: str) -> dict:
+        """특정 VOD 다운로드 작업의 상태를 반환한다."""
+        return self._vod_engine.get_task_status(task_id)
 
     def get_vod_status(self) -> dict:
-        """VOD 다운로드 상태를 반환한다."""
+        """하위 호환성을 위한 메서드. 첫 번째 작업의 상태를 반환한다."""
         return self._vod_engine.get_status()
 
-    def cancel_vod(self) -> dict:
+    def cancel_vod(self, task_id: str) -> dict:
         """VOD 다운로드를 취소한다."""
-        logger.info("[Service] VOD 다운로드 취소 요청")
-        return self._vod_engine.cancel_download()
+        logger.info(f"[Service] VOD 다운로드 취소 요청: {task_id}")
+        return self._vod_engine.cancel_download(task_id)
 
-    def pause_vod(self) -> dict:
+    def pause_vod(self, task_id: str) -> dict:
         """VOD 다운로드를 일시정지한다."""
-        logger.info("[Service] VOD 다운로드 일시정지 요청")
-        return self._vod_engine.pause_download()
+        logger.info(f"[Service] VOD 다운로드 일시정지 요청: {task_id}")
+        return self._vod_engine.pause_download(task_id)
 
-    def resume_vod(self) -> dict:
+    def resume_vod(self, task_id: str) -> dict:
         """VOD 다운로드를 재개한다."""
-        logger.info("[Service] VOD 다운로드 재개 요청")
-        return self._vod_engine.resume_download()
+        logger.info(f"[Service] VOD 다운로드 재개 요청: {task_id}")
+        return self._vod_engine.resume_download(task_id)
+
+    async def retry_vod(self, task_id: str) -> str:
+        """VOD 다운로드를 재시도한다. 새 task_id를 반환한다."""
+        logger.info(f"[Service] VOD 다운로드 재시도 요청: {task_id}")
+        return await self._vod_engine.retry_download(task_id)
+
+    def reorder_vod_tasks(self, task_ids: list[str]) -> dict:
+        """VOD 다운로드 작업 순서를 재정렬한다."""
+        logger.info(f"[Service] VOD 작업 순서 재정렬 요청: {len(task_ids)}개")
+        return self._vod_engine.reorder_tasks(task_ids)
+
+    def clear_completed_vod_tasks(self) -> dict:
+        """완료된 VOD 작업들을 일괄 삭제한다."""
+        logger.info(f"[Service] 완료된 VOD 작업 일괄 삭제 요청")
+        return self._vod_engine.clear_completed_tasks()
+
+    def open_vod_file_location(self, task_id: str) -> dict:
+        """VOD 다운로드 파일 위치를 탐색기로 연다."""
+        logger.info(f"[Service] VOD 파일 위치 열기 요청: {task_id}")
+        return self._vod_engine.open_file_location(task_id)
 
     # ── 인증 ─────────────────────────────────────────────
 

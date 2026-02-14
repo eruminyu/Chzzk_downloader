@@ -2,6 +2,24 @@ import { useState, useEffect } from "react";
 import { Plus, Trash2, Video, Radio, Play, Square, AlertCircle, Users, Eye } from "lucide-react";
 import { api, Channel } from "../api/client";
 
+// 초를 HH:MM:SS 형식으로 변환
+function formatDuration(seconds: number): string {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = Math.floor(seconds % 60);
+    return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+}
+
+// 바이트를 MB로 변환
+function formatFileSize(bytes: number): string {
+    const mb = bytes / (1024 * 1024);
+    if (mb < 1024) {
+        return `${mb.toFixed(1)} MB`;
+    }
+    const gb = mb / 1024;
+    return `${gb.toFixed(2)} GB`;
+}
+
 export default function Dashboard() {
     const [channels, setChannels] = useState<Channel[]>([]);
     const [newChannelId, setNewChannelId] = useState("");
@@ -274,19 +292,42 @@ function ChannelCard({ channel, onStartRecord, onStopRecord, onRemove, onToggleA
                 {/* 녹화 컨트롤 */}
                 <div className="mt-auto">
                     {channel.recording?.is_recording ? (
-                        <div className="flex items-center gap-2">
-                            <div className="flex-1 bg-red-500/10 border border-red-500/20 rounded-lg p-2 flex items-center gap-2 text-xs text-red-400 animate-pulse">
-                                <Video className="w-3 h-3" />
-                                녹화 중... ({Math.floor(channel.recording.duration_seconds)}s)
+                        <div className="space-y-2">
+                            <div className="flex items-center gap-2">
+                                <div className="flex-1 bg-red-500/10 border border-red-500/20 rounded-lg p-2 flex items-center gap-2 text-xs text-red-400 animate-pulse">
+                                    <Video className="w-3 h-3" />
+                                    녹화 중... ({formatDuration(channel.recording.duration_seconds)})
+                                </div>
+                                <button
+                                    onClick={() => onStopRecord(channel.channel_id)}
+                                    disabled={isActionLoading}
+                                    className="p-2 bg-zinc-800 hover:bg-red-600 text-red-400 hover:text-white rounded-lg border border-zinc-700 hover:border-red-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                    title="녹화 중단"
+                                >
+                                    <Square className="w-4 h-4 fill-current" />
+                                </button>
                             </div>
-                            <button
-                                onClick={() => onStopRecord(channel.channel_id)}
-                                disabled={isActionLoading}
-                                className="p-2 bg-zinc-800 hover:bg-red-600 text-red-400 hover:text-white rounded-lg border border-zinc-700 hover:border-red-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                                title="녹화 중단"
-                            >
-                                <Square className="w-4 h-4 fill-current" />
-                            </button>
+                            {/* 녹화 통계 */}
+                            <div className="grid grid-cols-3 gap-2 text-xs">
+                                <div className="bg-zinc-900/50 border border-zinc-800 rounded px-2 py-1">
+                                    <div className="text-zinc-500">용량</div>
+                                    <div className="text-zinc-300 font-mono">
+                                        {formatFileSize(channel.recording.file_size_bytes || 0)}
+                                    </div>
+                                </div>
+                                <div className="bg-zinc-900/50 border border-zinc-800 rounded px-2 py-1">
+                                    <div className="text-zinc-500">속도</div>
+                                    <div className="text-zinc-300 font-mono">
+                                        {(channel.recording.download_speed || 0).toFixed(2)} MB/s
+                                    </div>
+                                </div>
+                                <div className="bg-zinc-900/50 border border-zinc-800 rounded px-2 py-1">
+                                    <div className="text-zinc-500">비트레이트</div>
+                                    <div className="text-zinc-300 font-mono">
+                                        {(channel.recording.bitrate || 0).toFixed(0)} kbps
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     ) : channel.is_live ? (
                         <button
