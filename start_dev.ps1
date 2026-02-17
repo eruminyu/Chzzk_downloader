@@ -8,8 +8,8 @@ $root = Get-Location
 $backendPath = Join-Path $root "backend"
 if (Test-Path $backendPath) {
     Write-Host "Starting Backend Server..." -ForegroundColor Green
-    # python -m uvicorn app.main:app --reload --port 8000
-    Start-Process powershell -ArgumentList "-NoExit", "-Command", "& {cd '$backendPath'; Write-Host 'Backend Server (FastAPI)'; python run.py}"
+    # .venv\Scripts\python.exe run.py (Python 3.12)
+    Start-Process powershell -ArgumentList "-NoExit", "-Command", "& {cd '$backendPath'; Write-Host 'Backend Server (FastAPI - Python 3.12)'; .\.venv\Scripts\python.exe run.py}"
 }
 else {
     Write-Error "Backend directory not found at $backendPath"

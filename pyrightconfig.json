@@ -5,7 +5,7 @@
     "extraPaths": [
         "backend"
     ],
-    "pythonVersion": "3.10",
+    "pythonVersion": "3.12",
     "pythonPlatform": "Windows",
     "venvPath": "backend",
     "venv": ".venv",
