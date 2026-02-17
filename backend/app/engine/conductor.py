@@ -9,13 +9,17 @@ import asyncio
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from app.core.config import get_settings
 from app.core.logger import logger
 from app.engine.auth import AuthManager
+from app.engine.chat import ChatArchiver
 from app.engine.downloader import StreamLinkEngine
 from app.engine.pipeline import FFmpegPipeline, RecordingState
+
+if TYPE_CHECKING:
+    from app.services.discord_bot import DiscordBotService
 
 
 @dataclass
@@ -25,6 +29,7 @@ class ChannelTask:
     channel_id: str
     auto_record: bool = True
     pipeline: Optional[FFmpegPipeline] = field(default=None, repr=False)
+    chat_archiver: Optional[ChatArchiver] = field(default=None, repr=False)
     monitor_task: Optional[asyncio.Task] = field(default=None, repr=False)
     is_live: bool = False
     channel_name: Optional[str] = None
@@ -48,12 +53,17 @@ class Conductor:
         - 방송 종료 감지 시 녹화 중지
     """
 
-    def __init__(self, auth: Optional[AuthManager] = None) -> None:
+    def __init__(
+        self,
+        auth: Optional[AuthManager] = None,
+        discord_bot: Optional[DiscordBotService] = None,
+    ) -> None:
         self._auth = auth or AuthManager()
         self._engine = StreamLinkEngine(auth=self._auth)
         self._channels: dict[str, ChannelTask] = {}
         self._running = False
         self._persistence_path = Path("data/channels.json")
+        self._discord_bot = discord_bot
         self._load_persistence()
 
     @property
@@ -108,7 +118,7 @@ class Conductor:
         pipe = task.pipeline
         if pipe is not None and pipe.state in (RecordingState.RECORDING, RecordingState.ERROR):
             logger.info(f"[{channel_id}] 채널 제거 전 녹화 정지 중...")
-            await pipe.stop_recording()
+            await self._stop_recording(channel_id)
 
         # 감시 태스크 취소
         mt = task.monitor_task
@@ -141,7 +151,7 @@ class Conductor:
         for channel_id, task in self._channels.items():
             pipe = task.pipeline
             if pipe is not None and pipe.state == RecordingState.RECORDING:
-                await pipe.stop_recording()
+                await self._stop_recording(channel_id)
 
             mt = task.monitor_task
             if mt is not None and not mt.done():
@@ -219,9 +229,7 @@ class Conductor:
                 # ── 방송 종료 감지 ──
                 elif not status["is_live"] and was_live:
                     logger.info(f"[{channel_id}] ⚫ 방송 종료 감지.")
-                    pipe = task.pipeline
-                    if pipe is not None and pipe.state == RecordingState.RECORDING:
-                        await pipe.stop_recording()
+                    await self._stop_recording(channel_id)
                     retry_count = 0
 
                 # ── 녹화 오류 시 자동 재시작 ──
@@ -250,6 +258,44 @@ class Conductor:
 
             await asyncio.sleep(interval)
 
+    async def _stop_recording(self, channel_id: str) -> None:
+        """채널의 녹화 및 채팅 아카이빙을 중지한다."""
+        task = self._channels.get(channel_id)
+        if task is None:
+            return
+
+        # 녹화 중지
+        pipe = task.pipeline
+        if pipe is not None and pipe.state == RecordingState.RECORDING:
+            await pipe.stop_recording()
+
+            # ── Discord 알림: 녹화 완료 ──
+            if self._discord_bot:
+                status = pipe.get_status()
+                duration = status.get("duration_seconds", 0)
+                output_file = status.get("output_file", "N/A")
+                file_size = status.get("file_size_bytes", 0) / (1024 * 1024)  # MB
+
+                await self._discord_bot.send_notification(
+                    title="⏹ 녹화 완료",
+                    description=f"채널: **{task.channel_name or channel_id}**",
+                    color="blue",
+                    fields={
+                        "녹화 시간": f"{duration // 60:.0f}분 {duration % 60:.0f}초",
+                        "파일 크기": f"{file_size:.1f} MB",
+                        "저장 경로": output_file,
+                    },
+                )
+
+        # 채팅 아카이빙 중지
+        archiver = task.chat_archiver
+        if archiver is not None:
+            try:
+                await archiver.stop()
+                task.chat_archiver = None
+            except Exception as e:
+                logger.error(f"[{channel_id}] 채팅 아카이빙 중지 실패: {e}")
+
     async def _start_recording(self, channel_id: str, channel_name: Optional[str] = None, title: Optional[str] = None) -> None:
         """채널의 녹화를 시작한다."""
         task = self._channels.get(channel_id)
@@ -270,8 +316,44 @@ class Conductor:
                 title=title or task.title
             )
             logger.info(f"[{channel_id}] 자동 라이브 녹화 시작 (Hybrid, quality={quality}).")
+
+            # ── Discord 알림: 녹화 시작 ──
+            if self._discord_bot:
+                await self._discord_bot.send_notification(
+                    title="🔴 녹화 시작",
+                    description=f"채널: **{channel_name or channel_id}**\n제목: {title or 'N/A'}",
+                    color="green",
+                    fields={"화질": quality},
+                )
+
+            # ── 채팅 아카이빙 시작 (설정 활성화 시) ──
+            if settings.chat_archive_enabled:
+                try:
+                    # 녹화 파일과 같은 디렉토리에 .jsonl 파일 생성
+                    recording_status = pipeline.get_status()
+                    output_file = recording_status.get("output_file")
+                    if output_file:
+                        chat_file = Path(output_file).with_suffix(".jsonl")
+                        archiver = ChatArchiver(
+                            channel_id=channel_id,
+                            output_path=chat_file,
+                            auth=self._auth,
+                        )
+                        await archiver.start()
+                        task.chat_archiver = archiver
+                        logger.info(f"[{channel_id}] 채팅 아카이빙 시작: {chat_file}")
+                except Exception as e:
+                    logger.error(f"[{channel_id}] 채팅 아카이빙 시작 실패: {e}")
         except Exception as e:
             logger.error(f"[{channel_id}] 녹화 시작 실패: {e}")
+
+            # ── Discord 알림: 녹화 시작 실패 ──
+            if self._discord_bot:
+                await self._discord_bot.send_notification(
+                    title="❌ 녹화 시작 실패",
+                    description=f"채널: **{channel_name or channel_id}**\n오류: {str(e)}",
+                    color="red",
+                )
 
     async def start_manual_recording(self, channel_id: str) -> dict:
         """수동으로 특정 채널의 녹화를 시작한다."""
@@ -309,7 +391,7 @@ class Conductor:
         if pipe is None:
             return {"error": "녹화 중인 채널이 아닙니다."}
 
-        await pipe.stop_recording()
+        await self._stop_recording(channel_id)
         return pipe.get_status()
 
     def get_all_status(self) -> list[dict]:
@@ -321,6 +403,7 @@ class Conductor:
                 "auto_record": task.auto_record,
                 "is_live": task.is_live,
                 "recording": None,
+                "chat_archiving": None,
                 "channel_name": task.channel_name,
                 "title": task.title,
                 "category": task.category,
@@ -331,5 +414,10 @@ class Conductor:
             pipe = task.pipeline
             if pipe is not None:
                 status["recording"] = pipe.get_status()
+
+            archiver = task.chat_archiver
+            if archiver is not None:
+                status["chat_archiving"] = archiver.get_status()
+
             result.append(status)
         return result

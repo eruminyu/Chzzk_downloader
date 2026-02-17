@@ -41,8 +41,9 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8000
 
-    # ── Discord Bot (Phase 2) ────────────────────────────
+    # ── Discord Bot ──────────────────────────────────────
     discord_bot_token: Optional[str] = None
+    discord_notification_channel_id: Optional[str] = None  # 알림을 보낼 채널 ID
 
     # ── 감시 주기 (초) ───────────────────────────────────
     monitor_interval: int = 30
@@ -59,6 +60,9 @@ class Settings(BaseSettings):
     vod_max_concurrent: int = 3        # 동시 다운로드 최대 개수
     vod_default_quality: str = "best"  # 기본 화질: best, 1080p, 720p, 480p
     vod_max_speed: int = 0             # 최대 다운로드 속도 (MB/s, 0 = 무제한)
+
+    # ── 채팅 아카이빙 ────────────────────────────────────
+    chat_archive_enabled: bool = False  # 녹화 시 채팅 자동 아카이빙 여부
 
     def resolve_ffmpeg_path(self) -> str:
         """FFmpeg 실행 파일 경로를 탐색 순서에 따라 결정한다.

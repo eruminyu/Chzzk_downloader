@@ -3,7 +3,6 @@ import {
     Settings as SettingsIcon,
     Shield,
     Save,
-    Check,
     Key,
     Download,
     RefreshCcw,
@@ -12,25 +11,24 @@ import {
     Gauge,
     Timer,
     Loader2,
-    AlertCircle,
+    MessageSquare,
+    MessageCircle,
 } from "lucide-react";
 import { api, Settings as SettingsType } from "../api/client";
-
-type Toast = { type: "success" | "error"; text: string };
+import { useToast } from "../components/ui/Toast";
 
 export default function Settings() {
     const [settings, setSettings] = useState<SettingsType | null>(null);
+    const toast = useToast();
 
     // ── Auth state ──
     const [nidAut, setNidAut] = useState("");
     const [nidSes, setNidSes] = useState("");
-    const [authMsg, setAuthMsg] = useState<Toast | null>(null);
 
     // ── Download state ──
     const [keepParts, setKeepParts] = useState(false);
     const [maxRetries, setMaxRetries] = useState(3);
     const [dlSaving, setDlSaving] = useState(false);
-    const [dlMsg, setDlMsg] = useState<Toast | null>(null);
 
     // ── General state ──
     const [downloadDir, setDownloadDir] = useState("");
@@ -38,14 +36,21 @@ export default function Settings() {
     const [outputFormat, setOutputFormat] = useState("ts");
     const [recordingQuality, setRecordingQuality] = useState("best");
     const [genSaving, setGenSaving] = useState(false);
-    const [genMsg, setGenMsg] = useState<Toast | null>(null);
 
     // ── VOD settings state ──
     const [vodMaxConcurrent, setVodMaxConcurrent] = useState(3);
     const [vodDefaultQuality, setVodDefaultQuality] = useState("best");
     const [vodMaxSpeed, setVodMaxSpeed] = useState(0);
     const [vodSaving, setVodSaving] = useState(false);
-    const [vodMsg, setVodMsg] = useState<Toast | null>(null);
+
+    // ── Chat settings state ──
+    const [chatArchiveEnabled, setChatArchiveEnabled] = useState(false);
+    const [chatSaving, setChatSaving] = useState(false);
+
+    // Discord Settings
+    const [discordBotToken, setDiscordBotToken] = useState("");
+    const [discordChannelId, setDiscordChannelId] = useState("");
+    const [discordSaving, setDiscordSaving] = useState(false);
 
     useEffect(() => {
         loadSettings();
@@ -64,55 +69,48 @@ export default function Settings() {
             setVodMaxConcurrent(data.vod_max_concurrent);
             setVodDefaultQuality(data.vod_default_quality);
             setVodMaxSpeed(data.vod_max_speed);
-        } catch (e) {
-            console.error(e);
+            setChatArchiveEnabled(data.chat_archive_enabled);
+            setDiscordChannelId(data.discord_notification_channel_id || "");
+        } catch {
+            toast.error("설정을 불러오는 데 실패했습니다.");
         }
     };
 
     // ── Auth handlers ──
     const handleUpdateCookies = async () => {
-        setAuthMsg(null);
         try {
             await api.updateCookies(nidAut, nidSes);
-            setAuthMsg({ type: "success", text: "쿠키가 저장되었습니다!" });
+            toast.success("쿠키가 저장되었습니다!");
             loadSettings();
             setNidAut("");
             setNidSes("");
         } catch {
-            setAuthMsg({ type: "error", text: "쿠키 저장에 실패했습니다." });
+            toast.error("쿠키 저장에 실패했습니다.");
         }
     };
 
     const handleTestCookies = async () => {
-        setAuthMsg(null);
         try {
             const res = await api.testCookies();
             if (res.valid) {
-                setAuthMsg({
-                    type: "success",
-                    text: `인증 성공! 닉네임: ${res.user_status?.nickname || "User"}`,
-                });
+                toast.success(`인증 성공! 닉네임: ${res.user_status?.nickname || "User"}`);
             } else {
-                setAuthMsg({ type: "error", text: "쿠키가 유효하지 않습니다." });
+                toast.error("쿠키가 유효하지 않습니다.");
             }
         } catch (e: any) {
-            setAuthMsg({
-                type: "error",
-                text: e.response?.data?.detail || "검증에 실패했습니다.",
-            });
+            toast.error(e.response?.data?.detail || "검증에 실패했습니다.");
         }
     };
 
     // ── Download settings save ──
     const handleSaveDownloadSettings = async () => {
         setDlSaving(true);
-        setDlMsg(null);
         try {
             await api.updateDownloadSettings(keepParts, maxRetries);
-            setDlMsg({ type: "success", text: "다운로드 설정이 저장되었습니다." });
+            toast.success("다운로드 설정이 저장되었습니다.");
             loadSettings();
         } catch {
-            setDlMsg({ type: "error", text: "다운로드 설정 저장에 실패했습니다." });
+            toast.error("다운로드 설정 저장에 실패했습니다.");
         } finally {
             setDlSaving(false);
         }
@@ -121,7 +119,6 @@ export default function Settings() {
     // ── General settings save ──
     const handleSaveGeneralSettings = async () => {
         setGenSaving(true);
-        setGenMsg(null);
         try {
             await api.updateGeneralSettings({
                 download_dir: downloadDir,
@@ -129,13 +126,10 @@ export default function Settings() {
                 output_format: outputFormat,
                 recording_quality: recordingQuality,
             });
-            setGenMsg({ type: "success", text: "일반 설정이 저장되었습니다." });
+            toast.success("일반 설정이 저장되었습니다.");
             loadSettings();
         } catch (e: any) {
-            setGenMsg({
-                type: "error",
-                text: e.response?.data?.detail || "일반 설정 저장에 실패했습니다.",
-            });
+            toast.error(e.response?.data?.detail || "일반 설정 저장에 실패했습니다.");
         } finally {
             setGenSaving(false);
         }
@@ -144,43 +138,55 @@ export default function Settings() {
     // ── VOD settings save ──
     const handleSaveVodSettings = async () => {
         setVodSaving(true);
-        setVodMsg(null);
         try {
             await api.updateVodSettings({
                 vod_max_concurrent: vodMaxConcurrent,
                 vod_default_quality: vodDefaultQuality,
                 vod_max_speed: vodMaxSpeed,
             });
-            setVodMsg({ type: "success", text: "VOD 설정이 저장되었습니다." });
+            toast.success("VOD 설정이 저장되었습니다.");
             loadSettings();
         } catch (e: any) {
-            setVodMsg({
-                type: "error",
-                text: e.response?.data?.detail || "VOD 설정 저장에 실패했습니다.",
-            });
+            toast.error(e.response?.data?.detail || "VOD 설정 저장에 실패했습니다.");
         } finally {
             setVodSaving(false);
         }
     };
 
-    // ── Shared toast component ──
-    const ToastBox = ({ msg }: { msg: Toast | null }) =>
-        msg ? (
-            <div
-                className={`p-3 rounded-lg text-sm flex items-center gap-2 ${
-                    msg.type === "success"
-                        ? "bg-green-500/10 text-green-400"
-                        : "bg-red-500/10 text-red-400"
-                }`}
-            >
-                {msg.type === "success" ? (
-                    <Check className="w-4 h-4 shrink-0" />
-                ) : (
-                    <AlertCircle className="w-4 h-4 shrink-0" />
-                )}
-                {msg.text}
-            </div>
-        ) : null;
+    // ── Chat settings save ──
+    const handleSaveChatSettings = async () => {
+        setChatSaving(true);
+        try {
+            await api.updateChatSettings({
+                chat_archive_enabled: chatArchiveEnabled,
+            });
+            toast.success("채팅 설정이 저장되었습니다.");
+            loadSettings();
+        } catch (e: any) {
+            toast.error(e.response?.data?.detail || "채팅 설정 저장에 실패했습니다.");
+        } finally {
+            setChatSaving(false);
+        }
+    };
+
+    // ── Discord settings save ──
+    const handleSaveDiscordSettings = async () => {
+        setDiscordSaving(true);
+        try {
+            await api.updateDiscordSettings({
+                discord_bot_token: discordBotToken || undefined,
+                discord_notification_channel_id: discordChannelId || undefined,
+            });
+            toast.success("Discord 설정이 저장되었습니다. 재시작 후 적용됩니다.");
+            loadSettings();
+            // 보안을 위해 토큰 입력 필드 비우기
+            setDiscordBotToken("");
+        } catch (e: any) {
+            toast.error(e.response?.data?.detail || "Discord 설정 저장에 실패했습니다.");
+        } finally {
+            setDiscordSaving(false);
+        }
+    };
 
     // ── Select component ──
     const Select = ({
@@ -321,8 +327,6 @@ export default function Settings() {
                             )}
                             {genSaving ? "저장 중..." : "일반 설정 저장"}
                         </button>
-
-                        <ToastBox msg={genMsg} />
                     </div>
 
                     {/* ── VOD Download Settings Card ── */}
@@ -402,8 +406,6 @@ export default function Settings() {
                             )}
                             {vodSaving ? "저장 중..." : "VOD 설정 저장"}
                         </button>
-
-                        <ToastBox msg={vodMsg} />
                     </div>
                 </div>
 
@@ -470,8 +472,6 @@ export default function Settings() {
                                 <Shield className="w-4 h-4" /> 검증
                             </button>
                         </div>
-
-                        <ToastBox msg={authMsg} />
                     </div>
 
                     {/* ── Download Settings Card ── */}
@@ -542,8 +542,126 @@ export default function Settings() {
                             )}
                             {dlSaving ? "저장 중..." : "다운로드 설정 저장"}
                         </button>
+                    </div>
 
-                        <ToastBox msg={dlMsg} />
+                    {/* ── Chat Settings Card ── */}
+                    <div className="bg-zinc-900/50 p-6 rounded-xl border border-zinc-800 space-y-5">
+                        <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                            <MessageSquare className="w-5 h-5 text-cyan-500" />
+                            채팅 아카이빙
+                        </h3>
+
+                        {/* Chat Archive Toggle */}
+                        <div>
+                            <label className="block text-sm font-medium text-zinc-300 mb-2">
+                                실시간 채팅 저장
+                            </label>
+                            <div className="flex items-center gap-3">
+                                <button
+                                    type="button"
+                                    onClick={() => setChatArchiveEnabled(!chatArchiveEnabled)}
+                                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-offset-2 focus:ring-offset-zinc-900 ${
+                                        chatArchiveEnabled ? "bg-cyan-600" : "bg-zinc-700"
+                                    }`}
+                                >
+                                    <span
+                                        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                                            chatArchiveEnabled ? "translate-x-6" : "translate-x-1"
+                                        }`}
+                                    />
+                                </button>
+                                <span className="text-sm text-zinc-500">
+                                    {chatArchiveEnabled
+                                        ? "녹화 시 채팅 자동 저장"
+                                        : "채팅 저장 안 함"}
+                                </span>
+                            </div>
+                            <p className="text-xs text-zinc-500 mt-2">
+                                활성화 시 녹화와 함께 채팅 메시지를 JSONL 파일로 저장합니다.
+                            </p>
+                        </div>
+
+                        {/* Save Button */}
+                        <button
+                            onClick={handleSaveChatSettings}
+                            disabled={chatSaving}
+                            className="w-full bg-cyan-600 hover:bg-cyan-500 disabled:bg-zinc-700 text-white py-2.5 rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
+                        >
+                            {chatSaving ? (
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : (
+                                <Save className="w-4 h-4" />
+                            )}
+                            {chatSaving ? "저장 중..." : "채팅 설정 저장"}
+                        </button>
+                    </div>
+
+                    {/* ── Discord Settings Card ── */}
+                    <div className="bg-zinc-900/50 p-6 rounded-xl border border-zinc-800 space-y-5">
+                        <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                            <MessageCircle className="w-5 h-5 text-purple-500" />
+                            Discord Bot 알림
+                        </h3>
+
+                        {/* Bot Token Input */}
+                        <div>
+                            <label className="block text-sm font-medium text-zinc-300 mb-2">
+                                Bot 토큰
+                            </label>
+                            <input
+                                type="password"
+                                value={discordBotToken}
+                                onChange={(e) => setDiscordBotToken(e.target.value)}
+                                placeholder="Bot 토큰을 입력하세요 (변경 시에만)"
+                                className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-white placeholder:text-zinc-600 focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500"
+                            />
+                            <p className="text-xs text-zinc-500 mt-2">
+                                비어있으면 기존 설정 유지. Discord Developer Portal에서 발급받은 Bot 토큰을 입력하세요.
+                            </p>
+                        </div>
+
+                        {/* Channel ID Input */}
+                        <div>
+                            <label className="block text-sm font-medium text-zinc-300 mb-2">
+                                알림 채널 ID
+                            </label>
+                            <input
+                                type="text"
+                                value={discordChannelId}
+                                onChange={(e) => setDiscordChannelId(e.target.value)}
+                                placeholder="Discord 채널 ID를 입력하세요"
+                                className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-white placeholder:text-zinc-600 focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500"
+                            />
+                            <p className="text-xs text-zinc-500 mt-2">
+                                개발자 모드 활성화 후 채널 우클릭 → ID 복사로 확인 가능합니다.
+                            </p>
+                        </div>
+
+                        {/* Bot Status */}
+                        <div className="flex items-center gap-2 text-sm">
+                            <div
+                                className={`w-2 h-2 rounded-full ${settings?.discord_bot_configured ? "bg-green-500" : "bg-zinc-600"}`}
+                            />
+                            <span className="text-zinc-400">
+                                {settings?.discord_bot_configured
+                                    ? "Bot 설정됨 (재시작 후 활성화)"
+                                    : "Bot 미설정"}
+                            </span>
+                        </div>
+
+                        {/* Save Button */}
+                        <button
+                            onClick={handleSaveDiscordSettings}
+                            disabled={discordSaving}
+                            className="w-full bg-purple-600 hover:bg-purple-500 disabled:bg-zinc-700 text-white py-2.5 rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
+                        >
+                            {discordSaving ? (
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : (
+                                <Save className="w-4 h-4" />
+                            )}
+                            {discordSaving ? "저장 중..." : "Discord 설정 저장"}
+                        </button>
                     </div>
 
                     {/* ── System Info Card ── */}

@@ -23,6 +23,7 @@ from app.core.logger import logger
 from app.engine.auth import AuthManager
 from app.engine.conductor import Conductor
 from app.services.recorder import RecorderService
+from app.services.discord_bot import DiscordBotService
 
 # API Routers
 from app.api.stream import router as stream_router
@@ -65,6 +66,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     else:
         logger.info("🔓 비로그인 모드로 동작합니다.")
 
+    # Discord Bot 시작 (토큰이 설정되어 있으면 자동 구동)
+    discord_bot = DiscordBotService(recorder_service=_recorder_service)
+    await discord_bot.start()
+
+    # Conductor와 VodEngine에 Discord Bot 연결 (순환 참조 방지를 위해 나중에 설정)
+    conductor._discord_bot = discord_bot
+    _recorder_service._vod_engine._discord_bot = discord_bot
+
     logger.info(f"✅ {settings.app_name} Engine Started!")
 
     # Conductor 시작 (감시 루프 실행)
@@ -74,6 +83,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # ── 종료 ──
     logger.info(f"🛑 {settings.app_name} 종료 중...")
+    if discord_bot:
+        await discord_bot.stop()
     if conductor:
         await conductor.stop()
     _recorder_service = None

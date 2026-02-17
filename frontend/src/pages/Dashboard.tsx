@@ -1,6 +1,8 @@
 import { useState, useEffect } from "react";
-import { Plus, Trash2, Video, Radio, Play, Square, AlertCircle, Users, Eye } from "lucide-react";
+import { Plus, Trash2, Video, Radio, Play, Square, AlertCircle, Users, Eye, Loader2, WifiOff, MessageSquare } from "lucide-react";
 import { api, Channel } from "../api/client";
+import { useToast } from "../components/ui/Toast";
+import { useConfirm } from "../components/ui/ConfirmModal";
 
 // 초를 HH:MM:SS 형식으로 변환
 function formatDuration(seconds: number): string {
@@ -24,9 +26,13 @@ export default function Dashboard() {
     const [channels, setChannels] = useState<Channel[]>([]);
     const [newChannelId, setNewChannelId] = useState("");
     const [loading, setLoading] = useState(false);
+    const [initialLoading, setInitialLoading] = useState(true);
+    const [connectionError, setConnectionError] = useState(false);
+    const toast = useToast();
+    const confirm = useConfirm();
 
     useEffect(() => {
-        fetchChannels();
+        fetchChannels().finally(() => setInitialLoading(false));
         const interval = setInterval(fetchChannels, 5000);
         return () => clearInterval(interval);
     }, []);
@@ -35,8 +41,9 @@ export default function Dashboard() {
         try {
             const data = await api.getChannels();
             setChannels(data);
-        } catch (e) {
-            console.error(e);
+            setConnectionError(false);
+        } catch {
+            setConnectionError(true);
         }
     };
 
@@ -47,22 +54,29 @@ export default function Dashboard() {
         try {
             await api.addChannel(newChannelId);
             setNewChannelId("");
+            toast.success("채널이 추가되었습니다.");
             fetchChannels();
-        } catch (e) {
-            console.error(e);
-            alert("Failed to add channel");
+        } catch (e: any) {
+            toast.error(e.response?.data?.detail || "채널 추가에 실패했습니다.");
         } finally {
             setLoading(false);
         }
     };
 
-    const handleRemoveChannel = async (id: string) => {
-        if (!confirm(`Remove channel ${id}?`)) return;
+    const handleRemoveChannel = async (id: string, name?: string) => {
+        const ok = await confirm({
+            title: "채널 제거",
+            message: `'${name || id}' 채널을 감시 목록에서 제거할까요?`,
+            confirmText: "제거",
+            variant: "danger",
+        });
+        if (!ok) return;
         try {
             await api.removeChannel(id);
+            toast.success("채널이 제거되었습니다.");
             fetchChannels();
-        } catch (e) {
-            console.error(e);
+        } catch {
+            toast.error("채널 제거에 실패했습니다.");
         }
     };
 
@@ -73,10 +87,10 @@ export default function Dashboard() {
         setActionLoading(id);
         try {
             await api.startRecording(id);
+            toast.success("녹화를 시작합니다.");
             fetchChannels();
         } catch (e: any) {
-            console.error(e);
-            alert(e.response?.data?.detail || "녹화 시작 실패");
+            toast.error(e.response?.data?.detail || "녹화 시작에 실패했습니다.");
         } finally {
             setActionLoading(null);
         }
@@ -84,14 +98,20 @@ export default function Dashboard() {
 
     const handleStopRecord = async (id: string) => {
         if (actionLoading) return;
-        if (!confirm("녹화를 중지할까요?")) return;
+        const ok = await confirm({
+            title: "녹화 중지",
+            message: "현재 진행 중인 녹화를 중지할까요?",
+            confirmText: "중지",
+            variant: "danger",
+        });
+        if (!ok) return;
         setActionLoading(id);
         try {
             await api.stopRecording(id);
+            toast.success("녹화가 중지되었습니다.");
             fetchChannels();
         } catch (e: any) {
-            console.error(e);
-            alert(e.response?.data?.detail || "녹화 중지 실패");
+            toast.error(e.response?.data?.detail || "녹화 중지에 실패했습니다.");
         } finally {
             setActionLoading(null);
         }
@@ -101,8 +121,8 @@ export default function Dashboard() {
         try {
             await api.toggleAutoRecord(id);
             fetchChannels();
-        } catch (e) {
-            console.error(e);
+        } catch {
+            toast.error("자동 녹화 설정 변경에 실패했습니다.");
         }
     };
 
@@ -111,6 +131,14 @@ export default function Dashboard() {
 
     return (
         <div className="space-y-6">
+            {/* 연결 끊김 배너 */}
+            {connectionError && !initialLoading && (
+                <div className="flex items-center gap-3 px-4 py-3 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-sm">
+                    <WifiOff className="w-5 h-5 shrink-0" />
+                    <span>서버와 연결이 끊어졌습니다. 자동으로 재연결을 시도합니다...</span>
+                </div>
+            )}
+
             <div className="flex items-center justify-between">
                 <div>
                     <h2 className="text-2xl font-bold text-white flex items-center gap-2">
@@ -143,7 +171,28 @@ export default function Dashboard() {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {channels?.map((channel) => (
+                {/* 초기 로딩 스켈레톤 */}
+                {initialLoading && (
+                    <>
+                        {[1, 2, 3].map((i) => (
+                            <div key={i} className="bg-zinc-900/50 border border-zinc-800 rounded-xl overflow-hidden animate-pulse">
+                                <div className="w-full aspect-video bg-zinc-800" />
+                                <div className="p-4 space-y-3">
+                                    <div className="flex items-center gap-3">
+                                        <div className="w-9 h-9 rounded-full bg-zinc-800" />
+                                        <div className="flex-1 space-y-2">
+                                            <div className="h-4 bg-zinc-800 rounded w-3/4" />
+                                            <div className="h-3 bg-zinc-800 rounded w-1/2" />
+                                        </div>
+                                    </div>
+                                    <div className="h-8 bg-zinc-800 rounded" />
+                                </div>
+                            </div>
+                        ))}
+                    </>
+                )}
+
+                {!initialLoading && channels?.map((channel) => (
                     <ChannelCard
                         key={channel.channel_id}
                         channel={channel}
@@ -155,7 +204,7 @@ export default function Dashboard() {
                     />
                 ))}
 
-                {channels.length === 0 && (
+                {!initialLoading && channels.length === 0 && (
                     <div className="col-span-full py-12 text-center text-zinc-500">
                         감시 중인 채널이 없습니다. 채널 ID를 입력하여 모니터링을 시작하세요.
                     </div>
@@ -171,7 +220,7 @@ interface ChannelCardProps {
     channel: Channel;
     onStartRecord: (id: string) => void;
     onStopRecord: (id: string) => void;
-    onRemove: (id: string) => void;
+    onRemove: (id: string, name?: string) => void;
     onToggleAutoRecord: (id: string) => void;
     isActionLoading: boolean;
 }
@@ -221,7 +270,7 @@ function ChannelCard({ channel, onStartRecord, onStopRecord, onRemove, onToggleA
 
                 {/* 삭제 버튼 (hover) */}
                 <button
-                    onClick={() => onRemove(channel.channel_id)}
+                    onClick={() => onRemove(channel.channel_id, displayName)}
                     className="absolute top-2 right-2 p-1.5 bg-black/50 backdrop-blur-sm hover:bg-red-500/80 text-zinc-400 hover:text-white rounded-lg transition-all opacity-0 group-hover:opacity-100"
                     title="채널 제거"
                 >
@@ -304,7 +353,11 @@ function ChannelCard({ channel, onStartRecord, onStopRecord, onRemove, onToggleA
                                     className="p-2 bg-zinc-800 hover:bg-red-600 text-red-400 hover:text-white rounded-lg border border-zinc-700 hover:border-red-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                                     title="녹화 중단"
                                 >
-                                    <Square className="w-4 h-4 fill-current" />
+                                    {isActionLoading ? (
+                                        <Loader2 className="w-4 h-4 animate-spin" />
+                                    ) : (
+                                        <Square className="w-4 h-4 fill-current" />
+                                    )}
                                 </button>
                             </div>
                             {/* 녹화 통계 */}
@@ -328,6 +381,14 @@ function ChannelCard({ channel, onStartRecord, onStopRecord, onRemove, onToggleA
                                     </div>
                                 </div>
                             </div>
+
+                            {/* 채팅 아카이빙 상태 */}
+                            {channel.chat_archiving?.is_running && (
+                                <div className="flex items-center gap-2 bg-cyan-500/10 border border-cyan-500/20 rounded-lg p-2 text-xs text-cyan-400">
+                                    <MessageSquare className="w-3 h-3" />
+                                    채팅 수집 중 ({channel.chat_archiving.message_count.toLocaleString()}개)
+                                </div>
+                            )}
                         </div>
                     ) : channel.is_live ? (
                         <button
@@ -335,8 +396,17 @@ function ChannelCard({ channel, onStartRecord, onStopRecord, onRemove, onToggleA
                             disabled={isActionLoading}
                             className="w-full bg-zinc-800 hover:bg-zinc-700 text-green-400 border border-zinc-700 rounded-lg p-2 flex items-center justify-center gap-2 text-xs font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                         >
-                            <Play className="w-3 h-3 fill-current" />
-                            {isActionLoading ? '처리 중...' : '수동 녹화 시작'}
+                            {isActionLoading ? (
+                                <>
+                                    <Loader2 className="w-3 h-3 animate-spin" />
+                                    처리 중...
+                                </>
+                            ) : (
+                                <>
+                                    <Play className="w-3 h-3 fill-current" />
+                                    수동 녹화 시작
+                                </>
+                            )}
                         </button>
                     ) : (
                         <div className="bg-zinc-800/50 border border-zinc-800 rounded-lg p-2 flex items-center gap-2 text-xs text-zinc-500">
@@ -349,4 +419,3 @@ function ChannelCard({ channel, onStartRecord, onStopRecord, onRemove, onToggleA
         </div>
     );
 }
-

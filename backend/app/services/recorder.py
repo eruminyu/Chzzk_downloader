@@ -29,6 +29,7 @@ class RecorderService:
         self._conductor = conductor
         self._auth = auth or AuthManager()
         self._vod_engine = VodEngine(auth=self._auth)
+        # Discord Bot은 나중에 설정 (순환 참조 방지)
 
     # ── 채널 관리 ────────────────────────────────────────
 

@@ -1,0 +1,254 @@
+"""
+test_conductor.py
+채널 등록/제거, 자동녹화 토글, persistence 저장/로드, get_all_status() 응답 형식 테스트
+"""
+
+import pytest
+from pathlib import Path
+from unittest.mock import Mock, patch
+from app.engine.conductor import Conductor, ChannelTask
+
+
+class TestChannelTask:
+    """ChannelTask 데이터 클래스 테스트"""
+
+    def test_default_values(self):
+        """기본값 확인"""
+        task = ChannelTask(channel_id="test_channel")
+
+        assert task.channel_id == "test_channel"
+        assert task.auto_record is True
+        assert task.pipeline is None
+        assert task.chat_archiver is None
+        assert task.monitor_task is None
+        assert task.is_live is False
+        assert task.channel_name is None
+        assert task.title is None
+        assert task.category is None
+        assert task.viewer_count == 0
+        assert task.thumbnail_url is None
+        assert task.profile_image_url is None
+
+    def test_custom_values(self):
+        """커스텀 값 설정"""
+        task = ChannelTask(
+            channel_id="custom_channel",
+            auto_record=False,
+            is_live=True,
+            channel_name="타냐 TV",
+            title="오늘의 방송",
+            viewer_count=1234,
+        )
+
+        assert task.channel_id == "custom_channel"
+        assert task.auto_record is False
+        assert task.is_live is True
+        assert task.channel_name == "타냐 TV"
+        assert task.title == "오늘의 방송"
+        assert task.viewer_count == 1234
+
+
+class TestConductor:
+    """Conductor 클래스 테스트"""
+
+    @pytest.fixture
+    def isolated_conductor(self, tmp_path):
+        """persistence 파일을 임시 경로로 격리한 Conductor"""
+        conductor = Conductor()
+        conductor._persistence_path = tmp_path / "channels.json"
+        # 기존 채널 제거 (persistence에서 로드된 것들)
+        conductor._channels.clear()
+        return conductor
+
+    def test_initial_state(self, isolated_conductor):
+        """초기 상태 확인"""
+        conductor = isolated_conductor
+
+        assert conductor.is_running is False
+        assert conductor.channel_count == 0
+
+    def test_add_channel(self, isolated_conductor):
+        """채널 등록"""
+        conductor = isolated_conductor
+
+        conductor.add_channel(channel_id="test_channel_1", auto_record=True)
+
+        assert conductor.channel_count == 1
+        assert "test_channel_1" in conductor._channels
+        assert conductor._channels["test_channel_1"].auto_record is True
+
+    def test_add_multiple_channels(self, isolated_conductor):
+        """여러 채널 등록"""
+        conductor = isolated_conductor
+
+        conductor.add_channel(channel_id="channel_1")
+        conductor.add_channel(channel_id="channel_2")
+        conductor.add_channel(channel_id="channel_3", auto_record=False)
+
+        assert conductor.channel_count == 3
+        assert conductor._channels["channel_1"].auto_record is True
+        assert conductor._channels["channel_2"].auto_record is True
+        assert conductor._channels["channel_3"].auto_record is False
+
+    def test_add_duplicate_channel(self, isolated_conductor):
+        """중복 채널 등록 (덮어쓰기)"""
+        conductor = isolated_conductor
+
+        conductor.add_channel(channel_id="test_channel", auto_record=True)
+        conductor.add_channel(channel_id="test_channel", auto_record=False)
+
+        assert conductor.channel_count == 1
+        # 덮어쓰기되므로 auto_record=False
+        assert conductor._channels["test_channel"].auto_record is False
+
+    @pytest.mark.asyncio
+    async def test_remove_channel(self, isolated_conductor):
+        """채널 제거"""
+        conductor = isolated_conductor
+
+        conductor.add_channel(channel_id="test_channel")
+        assert conductor.channel_count == 1
+
+        await conductor.remove_channel(channel_id="test_channel")
+
+        assert conductor.channel_count == 0
+        assert "test_channel" not in conductor._channels
+
+    @pytest.mark.asyncio
+    async def test_remove_nonexistent_channel(self, isolated_conductor):
+        """존재하지 않는 채널 제거 시도"""
+        conductor = isolated_conductor
+
+        # 예외 발생 없이 경고 로그만 출력
+        await conductor.remove_channel(channel_id="nonexistent")
+
+        assert conductor.channel_count == 0
+
+    def test_toggle_auto_record(self, isolated_conductor):
+        """자동 녹화 토글"""
+        conductor = isolated_conductor
+
+        conductor.add_channel(channel_id="test_channel", auto_record=True)
+
+        # True → False
+        new_value = conductor.toggle_auto_record(channel_id="test_channel")
+        assert new_value is False
+        assert conductor._channels["test_channel"].auto_record is False
+
+        # False → True
+        new_value = conductor.toggle_auto_record(channel_id="test_channel")
+        assert new_value is True
+        assert conductor._channels["test_channel"].auto_record is True
+
+    def test_toggle_auto_record_nonexistent(self, isolated_conductor):
+        """존재하지 않는 채널의 자동 녹화 토글 시도"""
+        conductor = isolated_conductor
+
+        with pytest.raises(KeyError):
+            conductor.toggle_auto_record(channel_id="nonexistent")
+
+    def test_get_all_status_empty(self, isolated_conductor):
+        """빈 채널 목록 상태 조회"""
+        conductor = isolated_conductor
+
+        status = conductor.get_all_status()
+
+        assert status == []
+
+    def test_get_all_status_with_channels(self, isolated_conductor):
+        """채널 상태 조회"""
+        conductor = isolated_conductor
+
+        conductor.add_channel(channel_id="channel_1", auto_record=True)
+        conductor.add_channel(channel_id="channel_2", auto_record=False)
+
+        status = conductor.get_all_status()
+
+        assert len(status) == 2
+
+        # 첫 번째 채널
+        ch1 = next(ch for ch in status if ch["channel_id"] == "channel_1")
+        assert ch1["auto_record"] is True
+        assert ch1["is_live"] is False
+        assert ch1["recording"] is None
+        assert ch1["chat_archiving"] is None
+
+        # 두 번째 채널
+        ch2 = next(ch for ch in status if ch["channel_id"] == "channel_2")
+        assert ch2["auto_record"] is False
+
+    def test_get_all_status_response_format(self, isolated_conductor):
+        """get_all_status() 응답 형식 검증"""
+        conductor = isolated_conductor
+
+        conductor.add_channel(channel_id="test_channel")
+
+        status = conductor.get_all_status()
+
+        assert isinstance(status, list)
+        assert len(status) == 1
+
+        channel_status = status[0]
+
+        # 필수 필드 확인
+        assert "channel_id" in channel_status
+        assert "auto_record" in channel_status
+        assert "is_live" in channel_status
+        assert "recording" in channel_status
+        assert "chat_archiving" in channel_status
+        assert "channel_name" in channel_status
+        assert "title" in channel_status
+        assert "category" in channel_status
+        assert "viewer_count" in channel_status
+        assert "thumbnail_url" in channel_status
+        assert "profile_image_url" in channel_status
+
+    def test_persistence_save_and_load(self, tmp_path):
+        """채널 데이터 저장/로드"""
+        persistence_file = tmp_path / "channels.json"
+
+        # 1. Conductor 생성 및 채널 등록
+        conductor1 = Conductor()
+        conductor1._persistence_path = persistence_file
+
+        conductor1.add_channel(channel_id="channel_1", auto_record=True)
+        conductor1.add_channel(channel_id="channel_2", auto_record=False)
+
+        # 2. 저장
+        conductor1._save_persistence()
+
+        assert persistence_file.exists()
+
+        # 3. 새 Conductor로 로드
+        conductor2 = Conductor()
+        conductor2._persistence_path = persistence_file
+        conductor2._load_persistence()
+
+        assert conductor2.channel_count == 2
+        assert "channel_1" in conductor2._channels
+        assert "channel_2" in conductor2._channels
+        assert conductor2._channels["channel_1"].auto_record is True
+        assert conductor2._channels["channel_2"].auto_record is False
+
+    def test_persistence_load_nonexistent_file(self):
+        """존재하지 않는 파일 로드 시도 (예외 없음)"""
+        conductor = Conductor()
+        conductor._persistence_path = Path("/nonexistent/channels.json")
+
+        # 예외 발생 없이 빈 상태로 시작
+        conductor._load_persistence()
+
+        assert conductor.channel_count == 0
+
+    def test_persistence_save_creates_directory(self, tmp_path):
+        """저장 시 디렉토리 자동 생성"""
+        persistence_file = tmp_path / "data" / "channels.json"
+
+        conductor = Conductor()
+        conductor._persistence_path = persistence_file
+
+        conductor.add_channel(channel_id="test_channel")
+        conductor._save_persistence()
+
+        assert persistence_file.exists()
+        assert persistence_file.parent.exists()

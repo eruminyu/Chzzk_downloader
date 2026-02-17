@@ -49,6 +49,19 @@ class VodSettingsUpdateRequest(BaseModel):
     vod_max_speed: Optional[int] = Field(None, ge=0, le=1000, description="최대 다운로드 속도 (MB/s, 0=무제한)")
 
 
+class ChatSettingsUpdateRequest(BaseModel):
+    """채팅 아카이빙 설정 업데이트 요청."""
+
+    chat_archive_enabled: bool = Field(..., description="녹화 시 채팅 자동 아카이빙 여부")
+
+
+class DiscordSettingsUpdateRequest(BaseModel):
+    """Discord Bot 설정 업데이트 요청."""
+
+    discord_bot_token: Optional[str] = Field(None, description="Discord Bot 토큰")
+    discord_notification_channel_id: Optional[str] = Field(None, description="알림을 보낼 Discord 채널 ID")
+
+
 # ── .env 파일 헬퍼 ──────────────────────────────────────
 
 def _update_env_file(updates: dict[str, str]) -> None:
@@ -110,6 +123,10 @@ async def get_current_settings():
         "vod_max_concurrent": settings.vod_max_concurrent,
         "vod_default_quality": settings.vod_default_quality,
         "vod_max_speed": settings.vod_max_speed,
+        # 채팅 설정
+        "chat_archive_enabled": settings.chat_archive_enabled,
+        # Discord 설정
+        "discord_notification_channel_id": settings.discord_notification_channel_id,
     }
 
 
@@ -300,6 +317,55 @@ async def update_vod_settings(req: VodSettingsUpdateRequest):
             "vod_max_concurrent": settings.vod_max_concurrent,
             "vod_default_quality": settings.vod_default_quality,
             "vod_max_speed": settings.vod_max_speed,
+        },
+    }
+
+
+@router.put("/chat", summary="채팅 아카이빙 설정 업데이트")
+async def update_chat_settings(req: ChatSettingsUpdateRequest):
+    """채팅 아카이빙 설정을 업데이트합니다."""
+    settings = get_settings()
+    settings.chat_archive_enabled = req.chat_archive_enabled
+
+    try:
+        _update_env_file({
+            "CHAT_ARCHIVE_ENABLED": str(req.chat_archive_enabled).lower(),
+        })
+    except Exception as e:
+        print(f"설정 파일 저장 실패: {e}")
+
+    return {
+        "message": "채팅 아카이빙 설정이 업데이트되었습니다.",
+        "settings": {
+            "chat_archive_enabled": settings.chat_archive_enabled,
+        },
+    }
+
+
+@router.put("/discord", summary="Discord Bot 설정 업데이트")
+async def update_discord_settings(req: DiscordSettingsUpdateRequest):
+    """Discord Bot 설정을 업데이트합니다."""
+    settings = get_settings()
+
+    updates = {}
+    if req.discord_bot_token is not None:
+        settings.discord_bot_token = req.discord_bot_token if req.discord_bot_token.strip() else None
+        updates["DISCORD_BOT_TOKEN"] = req.discord_bot_token.strip()
+
+    if req.discord_notification_channel_id is not None:
+        settings.discord_notification_channel_id = req.discord_notification_channel_id if req.discord_notification_channel_id.strip() else None
+        updates["DISCORD_NOTIFICATION_CHANNEL_ID"] = req.discord_notification_channel_id.strip()
+
+    try:
+        _update_env_file(updates)
+    except Exception as e:
+        print(f"설정 파일 저장 실패: {e}")
+
+    return {
+        "message": "Discord Bot 설정이 업데이트되었습니다. 재시작 후 적용됩니다.",
+        "settings": {
+            "discord_bot_configured": bool(settings.discord_bot_token),
+            "discord_notification_channel_id": settings.discord_notification_channel_id,
         },
     }
 

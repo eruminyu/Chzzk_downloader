@@ -14,11 +14,14 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import TYPE_CHECKING, Any, Callable, Optional
 
 from app.core.config import get_settings
 from app.core.logger import logger
 from app.engine.auth import AuthManager
+
+if TYPE_CHECKING:
+    from app.services.discord_bot import DiscordBotService
 
 
 class DownloadCancelledError(Exception):
@@ -83,9 +86,14 @@ class VodEngine:
     다중 다운로드를 지원하며, task_id로 각 작업을 관리한다.
     """
 
-    def __init__(self, auth: Optional[AuthManager] = None) -> None:
+    def __init__(
+        self,
+        auth: Optional[AuthManager] = None,
+        discord_bot: Optional[DiscordBotService] = None,
+    ) -> None:
         self._auth = auth or AuthManager()
         self._tasks: dict[str, VodDownloadTask] = {}
+        self._discord_bot = discord_bot
 
         # 설정에서 동시 다운로드 개수 가져오기
         settings = get_settings()
@@ -411,12 +419,37 @@ class VodEngine:
             logger.info(f"[{task_id}] VOD 다운로드 완료: {filepath}")
             # 완료 시 이력 저장
             self._save_history()
+
+            # ── Discord 알림: VOD 다운로드 완료 ──
+            if self._discord_bot:
+                file_size = Path(filepath).stat().st_size / (1024 * 1024) if Path(filepath).exists() else 0
+                duration = (task.completed_at - task.started_at).total_seconds() if task.started_at and task.completed_at else 0
+
+                await self._discord_bot.send_notification(
+                    title="📥 VOD 다운로드 완료",
+                    description=f"제목: **{task.title}**",
+                    color="green",
+                    fields={
+                        "화질": task.quality,
+                        "파일 크기": f"{file_size:.1f} MB",
+                        "다운로드 시간": f"{duration // 60:.0f}분 {duration % 60:.0f}초" if duration > 0 else "N/A",
+                        "저장 경로": filepath,
+                    },
+                )
         else:
             task.state = VodDownloadState.ERROR
             task.error_message = "다운로드 결과를 확인할 수 없습니다."
             logger.error(f"[{task_id}] {task.error_message}")
             # 에러 시 이력 저장
             self._save_history()
+
+            # ── Discord 알림: VOD 다운로드 에러 ──
+            if self._discord_bot:
+                await self._discord_bot.send_notification(
+                    title="❌ VOD 다운로드 실패",
+                    description=f"제목: **{task.title}**\n오류: {task.error_message}",
+                    color="red",
+                )
 
     async def _download_clip(self, task_id: str, task: VodDownloadTask) -> None:
         """Streamlink + FFmpeg를 사용한 클립 다운로드."""

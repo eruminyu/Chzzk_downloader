@@ -16,38 +16,69 @@ import {
 } from "lucide-react";
 import { useVod } from "../contexts/VodContext";
 import { api, VodTask } from "../api/client";
+import { useToast } from "../components/ui/Toast";
+import { useConfirm } from "../components/ui/ConfirmModal";
 import { clsx } from "clsx";
 
 export default function VodDownload() {
     const { tasks, activeCount, addTask, cancelTask, pauseTask, resumeTask, retryTask, clearCompleted, openFileLocation } = useVod();
     const [url, setUrl] = useState("");
     const [loading, setLoading] = useState(false);
-    const [error, setError] = useState<string | null>(null);
     const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+    const toast = useToast();
+    const confirm = useConfirm();
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!url) return;
 
         setLoading(true);
-        setError(null);
 
         try {
-            // URL 입력 즉시 다운로드 시작 (자동 체크 + 다운로드)
             await addTask(url);
-            setUrl(""); // 입력 필드 초기화
+            setUrl("");
+            toast.success("다운로드가 시작되었습니다.");
         } catch (err: any) {
-            setError(err.response?.data?.detail || "다운로드 시작 실패");
+            toast.error(err.response?.data?.detail || "다운로드 시작에 실패했습니다.");
         } finally {
             setLoading(false);
         }
+    };
+
+    const handleCancel = async (taskId: string, title: string) => {
+        const ok = await confirm({
+            title: "다운로드 취소",
+            message: `'${title}' 다운로드를 취소할까요?`,
+            confirmText: "취소",
+            variant: "danger",
+        });
+        if (ok) cancelTask(taskId);
+    };
+
+    const handleRetry = async (taskId: string, title: string) => {
+        const ok = await confirm({
+            title: "재다운로드",
+            message: `'${title}'을(를) 다시 다운로드할까요?`,
+            confirmText: "재다운로드",
+        });
+        if (ok) retryTask(taskId);
+    };
+
+    const handleClearCompleted = async () => {
+        const ok = await confirm({
+            title: "완료된 작업 정리",
+            message: "완료 및 오류 상태의 작업을 모두 삭제할까요?",
+            confirmText: "정리",
+            variant: "danger",
+        });
+        if (ok) clearCompleted();
     };
 
     const handleDragStart = (index: number) => {
         setDraggedIndex(index);
     };
 
-    const handleDragOver = (e: React.DragEvent, index: number) => {
+    const handleDragOver = (e: React.DragEvent, _index: number) => {
         e.preventDefault();
     };
 
@@ -58,17 +89,15 @@ export default function VodDownload() {
             return;
         }
 
-        // 배열 재정렬
         const newTasks = [...tasks];
         const [draggedTask] = newTasks.splice(draggedIndex, 1);
         newTasks.splice(dropIndex, 0, draggedTask);
 
-        // 백엔드에 순서 업데이트
         try {
             const taskIds = newTasks.map((t) => t.task_id);
             await api.reorderVodTasks(taskIds);
-        } catch (err) {
-            console.error("작업 순서 변경 실패:", err);
+        } catch {
+            toast.error("작업 순서 변경에 실패했습니다.");
         }
 
         setDraggedIndex(null);
@@ -121,13 +150,6 @@ export default function VodDownload() {
                     </button>
                 </div>
 
-                {error && (
-                    <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg flex items-center gap-2 text-red-400 text-sm">
-                        <AlertCircle className="w-4 h-4" />
-                        {error}
-                    </div>
-                )}
-
                 <div className="flex flex-wrap gap-3 text-xs text-zinc-500">
                     <span className="flex items-center">
                         <CheckCircle className="w-3 h-3 mr-1 text-green-500" /> 1080p60 지원
@@ -155,7 +177,7 @@ export default function VodDownload() {
                     </h3>
                     {tasks.some(t => t.state === "completed" || t.state === "error") && (
                         <button
-                            onClick={clearCompleted}
+                            onClick={handleClearCompleted}
                             className="flex items-center gap-2 px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white rounded-lg text-sm border border-zinc-700 transition-colors"
                         >
                             <Trash2 className="w-4 h-4" />
@@ -186,10 +208,10 @@ export default function VodDownload() {
                             >
                                 <TaskCard
                                     task={task}
-                                    onCancel={() => cancelTask(task.task_id)}
+                                    onCancel={() => handleCancel(task.task_id, task.title)}
                                     onPause={() => pauseTask(task.task_id)}
                                     onResume={() => resumeTask(task.task_id)}
-                                    onRetry={() => retryTask(task.task_id)}
+                                    onRetry={() => handleRetry(task.task_id, task.title)}
                                     onOpenLocation={() => openFileLocation(task.task_id)}
                                 />
                             </div>
@@ -347,9 +369,7 @@ function TaskCard({ task, onCancel, onPause, onResume, onRetry, onOpenLocation }
                             </button>
                         )}
                         <button
-                            onClick={() => {
-                                if (confirm("다운로드를 취소하시겠습니까?")) onCancel();
-                            }}
+                            onClick={onCancel}
                             className="p-1.5 bg-zinc-800 hover:bg-zinc-700 text-red-400 rounded-lg transition-colors flex items-center gap-1 text-xs"
                             title="취소"
                         >
@@ -363,9 +383,7 @@ function TaskCard({ task, onCancel, onPause, onResume, onRetry, onOpenLocation }
                 {(task.state === "completed" || task.state === "error") && (
                     <div className="flex gap-2">
                         <button
-                            onClick={() => {
-                                if (confirm("이 영상을 다시 다운로드하시겠습니까?")) onRetry();
-                            }}
+                            onClick={onRetry}
                             className="p-1.5 bg-zinc-800 hover:bg-zinc-700 text-blue-400 rounded-lg transition-colors flex items-center gap-1 text-xs"
                             title="재다운로드"
                         >

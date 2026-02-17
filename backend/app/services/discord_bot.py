@@ -91,6 +91,61 @@ class DiscordBotService:
         if task is not None and not task.done():
             task.cancel()
 
+    async def send_notification(
+        self,
+        title: str,
+        description: str,
+        color: str = "green",
+        fields: Optional[dict[str, str]] = None,
+    ) -> None:
+        """Discord 채널에 Embed 알림을 전송한다.
+
+        Args:
+            title: Embed 제목
+            description: Embed 내용
+            color: Embed 색상 ("green", "red", "blue", "yellow")
+            fields: 추가 필드 (key-value 형식)
+        """
+        if not HAS_DISCORD:
+            return
+
+        settings = get_settings()
+        channel_id = settings.discord_notification_channel_id
+
+        if not channel_id or self._bot is None or not self._bot.is_ready():
+            return
+
+        try:
+            channel = self._bot.get_channel(int(channel_id))
+            if channel is None:
+                logger.warning(f"Discord 채널을 찾을 수 없습니다: {channel_id}")
+                return
+
+            # 색상 매핑
+            color_map = {
+                "green": discord.Color.green(),
+                "red": discord.Color.red(),
+                "blue": discord.Color.blue(),
+                "yellow": discord.Color.yellow(),
+            }
+            embed_color = color_map.get(color, discord.Color.greyple())
+
+            embed = discord.Embed(
+                title=title,
+                description=description,
+                color=embed_color,
+            )
+
+            if fields:
+                for key, value in fields.items():
+                    embed.add_field(name=key, value=value, inline=False)
+
+            await channel.send(embed=embed)  # type: ignore[union-attr]
+            logger.debug(f"Discord 알림 전송 완료: {title}")
+
+        except Exception as e:
+            logger.error(f"Discord 알림 전송 실패: {e}")
+
     def _register_commands(self) -> None:
         """Bot 명령어를 등록한다."""
         if self._bot is None:

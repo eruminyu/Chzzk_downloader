@@ -6,3 +6,5 @@ yt-dlp
 ffmpeg-python
 python-dotenv
 pydantic-settings
+chzzkpy
+discord.py
