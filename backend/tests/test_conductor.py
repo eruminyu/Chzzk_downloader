@@ -4,7 +4,6 @@ test_conductor.py
 """
 
 import pytest
-from pathlib import Path
 from unittest.mock import Mock, patch
 from app.engine.conductor import Conductor, ChannelTask
 
@@ -91,15 +90,15 @@ class TestConductor:
         assert conductor._channels["channel_3"].auto_record is False
 
     def test_add_duplicate_channel(self, isolated_conductor):
-        """중복 채널 등록 (덮어쓰기)"""
+        """중복 채널 등록 (무시됨)"""
         conductor = isolated_conductor
 
         conductor.add_channel(channel_id="test_channel", auto_record=True)
         conductor.add_channel(channel_id="test_channel", auto_record=False)
 
         assert conductor.channel_count == 1
-        # 덮어쓰기되므로 auto_record=False
-        assert conductor._channels["test_channel"].auto_record is False
+        # 중복 등록은 무시되므로 첫 번째 값 유지
+        assert conductor._channels["test_channel"].auto_record is True
 
     @pytest.mark.asyncio
     async def test_remove_channel(self, isolated_conductor):
@@ -144,7 +143,8 @@ class TestConductor:
         """존재하지 않는 채널의 자동 녹화 토글 시도"""
         conductor = isolated_conductor
 
-        with pytest.raises(KeyError):
+        # Conductor.toggle_auto_record는 ValueError 발생
+        with pytest.raises(ValueError, match="찾을 수 없습니다"):
             conductor.toggle_auto_record(channel_id="nonexistent")
 
     def test_get_all_status_empty(self, isolated_conductor):
@@ -207,21 +207,21 @@ class TestConductor:
         """채널 데이터 저장/로드"""
         persistence_file = tmp_path / "channels.json"
 
-        # 1. Conductor 생성 및 채널 등록
+        # 1. isolated_conductor를 사용하지 않고 직접 생성
         conductor1 = Conductor()
         conductor1._persistence_path = persistence_file
+        conductor1._channels.clear()  # 기존 persistence 데이터 제거
 
         conductor1.add_channel(channel_id="channel_1", auto_record=True)
         conductor1.add_channel(channel_id="channel_2", auto_record=False)
 
-        # 2. 저장
-        conductor1._save_persistence()
-
+        # 2. 저장 (add_channel이 자동으로 저장하므로 이미 저장됨)
         assert persistence_file.exists()
 
         # 3. 새 Conductor로 로드
         conductor2 = Conductor()
         conductor2._persistence_path = persistence_file
+        conductor2._channels.clear()
         conductor2._load_persistence()
 
         assert conductor2.channel_count == 2
@@ -230,10 +230,11 @@ class TestConductor:
         assert conductor2._channels["channel_1"].auto_record is True
         assert conductor2._channels["channel_2"].auto_record is False
 
-    def test_persistence_load_nonexistent_file(self):
+    def test_persistence_load_nonexistent_file(self, tmp_path):
         """존재하지 않는 파일 로드 시도 (예외 없음)"""
         conductor = Conductor()
-        conductor._persistence_path = Path("/nonexistent/channels.json")
+        conductor._persistence_path = tmp_path / "nonexistent.json"
+        conductor._channels.clear()
 
         # 예외 발생 없이 빈 상태로 시작
         conductor._load_persistence()
@@ -246,9 +247,10 @@ class TestConductor:
 
         conductor = Conductor()
         conductor._persistence_path = persistence_file
+        conductor._channels.clear()
 
         conductor.add_channel(channel_id="test_channel")
-        conductor._save_persistence()
+        # add_channel이 자동으로 _save_persistence() 호출
 
         assert persistence_file.exists()
         assert persistence_file.parent.exists()
