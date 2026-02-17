@@ -217,10 +217,17 @@ class FFmpegPipeline:
 
         # 포맷별 옵션
         ext = settings.output_format or "ts"
+
         if ext in ("mp4", "mkv"):
             cmd.extend(["-bsf:a", "aac_adtstoasc"])
+
         if ext == "mp4":
-            cmd.extend(["-movflags", "+faststart"])
+            # MP4 fragmented 모드: 중단되어도 재생 가능!
+            # -movflags +frag_keyframe: 키프레임마다 fragment 생성
+            # -movflags +empty_moov: 파일 헤더를 맨 앞에 먼저 작성
+            # -movflags +default_base_moof: fragment 기반 재생 지원
+            cmd.extend(["-movflags", "+frag_keyframe+empty_moov+default_base_moof"])
+            logger.info(f"[{self._channel_id}] MP4 fragmented 모드 활성화 (중단 시 자동 복구)")
 
         cmd.extend(["-y", str(output_file)])
 

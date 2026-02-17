@@ -304,44 +304,32 @@ class VodEngine:
             task.started_at = datetime.now()
             logger.info(f"[{task_id}] 다운로드 시작: {task.url}")
 
-            # URL 타입 감지: 클립인지 VOD인지 판별
+            # URL 타입 감지: 치지직 URL이면 Streamlink, 그 외는 yt-dlp
+            is_chzzk = self._is_chzzk_url(task.url)
             is_clip = "/clips/" in task.url
 
             try:
-                if is_clip:
-                    # 클립 다운로드 (Streamlink + FFmpeg 사용)
+                if is_chzzk and is_clip:
+                    # 치지직 클립 (Streamlink + FFmpeg)
                     await self._download_clip(task_id, task)
-                else:
-                    # VOD 다운로드 (yt-dlp 사용)
+                elif is_chzzk:
+                    # 치지직 VOD (Streamlink + FFmpeg)
                     await self._download_vod(task_id, task)
+                else:
+                    # 유튜브 등 외부 URL (yt-dlp)
+                    await self._download_external(task_id, task)
 
             except DownloadCancelledError:
                 task.state = VodDownloadState.IDLE
                 task.progress = 0.0
                 logger.info(f"[{task_id}] 다운로드 취소됨: {task.url}")
 
-                # 취소 시 .part 파일 정리
-                if task.expected_part_file and Path(task.expected_part_file).exists():
-                    try:
-                        Path(task.expected_part_file).unlink()
-                        logger.info(f"[{task_id}] .part 파일 삭제: {task.expected_part_file}")
-                    except Exception as e:
-                        logger.warning(f"[{task_id}] .part 파일 정리 실패: {e}")
-
             except Exception as e:
-                # yt-dlp 내부에서 DownloadCancelledError를 DownloadError로 감싸는 경우 대응
+                # FFmpeg 프로세스 실패 시 처리
                 if task.cancel_flag:
                     task.state = VodDownloadState.IDLE
                     task.progress = 0.0
                     logger.info(f"[{task_id}] 다운로드 취소됨 (예외 처리): {task.url}")
-
-                    # .part 파일 정리
-                    if task.expected_part_file and Path(task.expected_part_file).exists():
-                        try:
-                            Path(task.expected_part_file).unlink()
-                            logger.info(f"[{task_id}] .part 파일 삭제: {task.expected_part_file}")
-                        except Exception as cleanup_err:
-                            logger.warning(f"[{task_id}] .part 파일 정리 실패: {cleanup_err}")
                 else:
                     import traceback
                     task.retry_count += 1
@@ -365,64 +353,111 @@ class VodEngine:
                         return await self._run_download(task_id)
                     else:
                         # 최대 재시도 횟수 초과
-                        task.state = VodDownloadState.ERROR
-                        task.error_message = f"재시도 {task.max_retries}회 실패: {str(e)}"
                         logger.error(f"[{task_id}] 최대 재시도 횟수 초과: {e}")
                         logger.error(f"[{task_id}] 상세 트레이스:\n{traceback.format_exc()}")
+
+                        task.error_message = f"재시도 {task.max_retries}회 실패: {str(e)}"
+                        task.state = VodDownloadState.ERROR
                         # 에러 발생 시 이력 저장
                         self._save_history()
 
     async def _download_vod(self, task_id: str, task: VodDownloadTask) -> None:
-        """yt-dlp를 사용한 VOD 다운로드."""
-        import yt_dlp
+        """Streamlink + FFmpeg를 사용한 VOD 다운로드 (중단 시에도 재생 가능).
 
-        # 1. 먼저 메타데이터 추출 (파일명 미리 확보)
-        opts_info = self._build_ytdlp_options(task, progress_callback=None)
+        치지직 VOD URL → Streamlink으로 스트림 추출 → FFmpeg 파이프라인으로 저장.
+        라이브 녹화와 동일한 방식으로, 중단되어도 바로 재생 가능하다.
+        """
+        from app.engine.pipeline import FFmpegPipeline
 
-        def _extract_info() -> dict[str, Any] | None:
-            with yt_dlp.YoutubeDL(opts_info) as ydl:
-                return ydl.extract_info(task.url, download=False)
+        settings = get_settings()
 
-        info: dict[str, Any] | None = await asyncio.to_thread(lambda: _extract_info())  # type: ignore[arg-type]
+        # 1. Streamlink으로 VOD 스트림 및 메타데이터 가져오기
+        def _get_streams() -> dict[str, Any]:
+            import streamlink
+            from streamlink.plugins.chzzk import Chzzk
 
-        if not info:
-            raise RuntimeError("영상 정보를 가져올 수 없습니다.")
+            session = streamlink.Streamlink()
+            sl_options = self._auth.get_streamlink_options()
+            for key, value in sl_options.items():
+                session.set_option(key, value)
 
-        # VOD 메타데이터: [채널명] 제목 형식
-        vod_title = info.get("title", "Unknown")
-        uploader = info.get("uploader") or info.get("channel") or "Unknown Channel"
-        task.title = f"[{uploader}] {vod_title}"
+            plugin = Chzzk(session, task.url)
+            streams = plugin.streams()
+            if not streams:
+                raise RuntimeError("VOD 스트림을 찾을 수 없습니다.")
+
+            vod_title = getattr(plugin, 'title', None) or "Unknown VOD"
+            channel_name = getattr(plugin, 'author', None) or "Unknown Channel"
+
+            logger.info(f"[{task_id}] VOD 제목: {vod_title}, 채널: {channel_name}")
+
+            return {
+                "streams": streams,
+                "vod_title": vod_title,
+                "channel_name": channel_name,
+            }
+
+        stream_data: dict[str, Any] = await asyncio.to_thread(_get_streams)
+        streams = stream_data["streams"]
+
+        # UI 표시용 제목 설정
+        task.title = f'[{stream_data["channel_name"]}] {stream_data["vod_title"]}'
         logger.info(f"[{task_id}] VOD 메타데이터: {task.title}")
 
-        # 예상 파일명 저장 (.part 파일 정리용)
-        with yt_dlp.YoutubeDL(opts_info) as ydl:
-            expected_file = ydl.prepare_filename(info)
-            task.expected_part_file = expected_file + ".part"
+        # 화질 선택
+        stream = streams.get(task.quality) or streams.get("best")
+        if not stream:
+            raise RuntimeError(f"화질 '{task.quality}'를 찾을 수 없습니다.")
 
-        # 2. 실제 다운로드 (진행률 콜백 포함)
-        opts = self._build_ytdlp_options(
-            task,
-            progress_callback=self._make_progress_callback(task),
+        # 파일명 생성: [채널명] 제목.{ext}
+        ext = settings.output_format or "mp4"
+        channel_name_clean = self._clean_filename(stream_data["channel_name"])
+        vod_title_clean = self._clean_filename(stream_data["vod_title"])
+        filename = f"[{channel_name_clean}] {vod_title_clean}.{ext}"
+        output_file = Path(task.output_dir) / filename
+        task.output_path = str(output_file)
+
+        logger.info(f"[{task_id}] VOD 다운로드: {task.url} -> {output_file}")
+
+        # 2. FFmpeg 파이프라인으로 다운로드
+        pipeline = FFmpegPipeline(channel_id=task_id)
+        await pipeline.start_recording(
+            stream_obj=stream,
+            output_dir=task.output_dir,
+            filename=filename,
         )
 
-        def _download() -> str | None:
-            with yt_dlp.YoutubeDL(opts) as ydl:
-                ydl.extract_info(task.url, download=True)
-                return expected_file
+        # 3. 진행률 모니터링 (파일 크기 기반)
+        while pipeline.state.value == "recording":
+            if task.cancel_flag:
+                await pipeline.stop_recording()
+                raise DownloadCancelledError("사용자에 의해 취소되었습니다.")
 
-        filepath: str | None = await asyncio.to_thread(lambda: _download())  # type: ignore[arg-type]
+            # 일시정지 체크
+            task.pause_event.wait()
 
-        if filepath:
+            # 파일 크기 기반 진행률 추정
+            if output_file.exists():
+                downloaded = output_file.stat().st_size
+                task.downloaded_bytes = downloaded
+                task.download_speed = 0.0
+                # 크기 정보가 없으므로 대략적으로 표시
+                task.progress = min((downloaded / (500 * 1024 * 1024)) * 100, 99.0)
+
+            await asyncio.sleep(2)
+
+        # 4. 완료 확인
+        if pipeline.state.value == "completed" and output_file.exists():
             task.state = VodDownloadState.COMPLETED
             task.completed_at = datetime.now()
-            task.output_path = filepath
-            logger.info(f"[{task_id}] VOD 다운로드 완료: {filepath}")
-            # 완료 시 이력 저장
+            task.output_path = str(output_file)
+            task.progress = 100.0
+            logger.info(f"[{task_id}] VOD 다운로드 완료: {output_file}")
             self._save_history()
 
             # ── Discord 알림: VOD 다운로드 완료 ──
             if self._discord_bot:
-                file_size = Path(filepath).stat().st_size / (1024 * 1024) if Path(filepath).exists() else 0
+                file_size = output_file.stat().st_size / (1024 * 1024)
                 duration = (task.completed_at - task.started_at).total_seconds() if task.started_at and task.completed_at else 0
 
                 await self._discord_bot.send_notification(
@@ -433,23 +468,11 @@ class VodEngine:
                         "화질": task.quality,
                         "파일 크기": f"{file_size:.1f} MB",
                         "다운로드 시간": f"{duration // 60:.0f}분 {duration % 60:.0f}초" if duration > 0 else "N/A",
-                        "저장 경로": filepath,
+                        "저장 경로": str(output_file),
                     },
                 )
         else:
-            task.state = VodDownloadState.ERROR
-            task.error_message = "다운로드 결과를 확인할 수 없습니다."
-            logger.error(f"[{task_id}] {task.error_message}")
-            # 에러 시 이력 저장
-            self._save_history()
-
-            # ── Discord 알림: VOD 다운로드 에러 ──
-            if self._discord_bot:
-                await self._discord_bot.send_notification(
-                    title="❌ VOD 다운로드 실패",
-                    description=f"제목: **{task.title}**\n오류: {task.error_message}",
-                    color="red",
-                )
+            raise RuntimeError(f"FFmpeg 파이프라인 오류: {pipeline.state.value}")
 
     async def _download_clip(self, task_id: str, task: VodDownloadTask) -> None:
         """Streamlink + FFmpeg를 사용한 클립 다운로드."""
@@ -546,6 +569,74 @@ class VodEngine:
         else:
             raise RuntimeError(f"FFmpeg 파이프라인 오류: {pipeline.state.value}")
 
+    async def _download_external(self, task_id: str, task: VodDownloadTask) -> None:
+        """yt-dlp를 사용한 외부 URL(유튜브 등) 다운로드."""
+        import yt_dlp
+
+        # 1. 메타데이터 추출
+        opts_info = self._build_ytdlp_options(task, progress_callback=None)
+
+        def _extract_info() -> dict[str, Any] | None:
+            with yt_dlp.YoutubeDL(opts_info) as ydl:
+                return ydl.extract_info(task.url, download=False)
+
+        info: dict[str, Any] | None = await asyncio.to_thread(lambda: _extract_info())  # type: ignore[arg-type]
+
+        if not info:
+            raise RuntimeError("영상 정보를 가져올 수 없습니다.")
+
+        vod_title = info.get("title", "Unknown")
+        uploader = info.get("uploader") or info.get("channel") or "Unknown Channel"
+        task.title = f"[{uploader}] {vod_title}"
+        logger.info(f"[{task_id}] 외부 VOD 메타데이터: {task.title}")
+
+        # 예상 파일명 저장
+        with yt_dlp.YoutubeDL(opts_info) as ydl:
+            expected_file = ydl.prepare_filename(info)
+            task.expected_part_file = expected_file + ".part"
+
+        # 2. 실제 다운로드
+        opts = self._build_ytdlp_options(
+            task,
+            progress_callback=self._make_progress_callback(task),
+        )
+
+        def _download() -> str | None:
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                ydl.extract_info(task.url, download=True)
+                return expected_file
+
+        filepath: str | None = await asyncio.to_thread(lambda: _download())  # type: ignore[arg-type]
+
+        if filepath:
+            task.state = VodDownloadState.COMPLETED
+            task.completed_at = datetime.now()
+            task.output_path = filepath
+            task.progress = 100.0
+            logger.info(f"[{task_id}] 외부 VOD 다운로드 완료: {filepath}")
+            self._save_history()
+
+            if self._discord_bot:
+                file_size = Path(filepath).stat().st_size / (1024 * 1024) if Path(filepath).exists() else 0
+                duration = (task.completed_at - task.started_at).total_seconds() if task.started_at and task.completed_at else 0
+
+                await self._discord_bot.send_notification(
+                    title="📥 VOD 다운로드 완료",
+                    description=f"제목: **{task.title}**",
+                    color="green",
+                    fields={
+                        "화질": task.quality,
+                        "파일 크기": f"{file_size:.1f} MB",
+                        "다운로드 시간": f"{duration // 60:.0f}분 {duration % 60:.0f}초" if duration > 0 else "N/A",
+                        "저장 경로": filepath,
+                    },
+                )
+        else:
+            task.state = VodDownloadState.ERROR
+            task.error_message = "다운로드 결과를 확인할 수 없습니다."
+            logger.error(f"[{task_id}] {task.error_message}")
+            self._save_history()
+
     def _clean_filename(self, name: str) -> str:
         """파일명에서 사용할 수 없는 특수문자를 제거한다."""
         import re
@@ -620,6 +711,7 @@ class VodEngine:
             "state": task.state.value,
             "task_id": task_id,
         }
+
 
     async def retry_download(self, task_id: str) -> str:
         """완료/에러 상태의 작업을 재다운로드한다."""

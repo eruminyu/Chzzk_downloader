@@ -49,7 +49,7 @@ export default function VodDownload() {
         const ok = await confirm({
             title: "다운로드 취소",
             message: `'${title}' 다운로드를 취소할까요?`,
-            confirmText: "취소",
+            confirmText: "중단",
             variant: "danger",
         });
         if (ok) cancelTask(taskId);
