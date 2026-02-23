@@ -1,26 +1,10 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Plus, Trash2, Video, Radio, Play, Square, AlertCircle, Users, Eye, Loader2, WifiOff, MessageSquare } from "lucide-react";
 import { api, Channel } from "../api/client";
 import { useToast } from "../components/ui/Toast";
 import { useConfirm } from "../components/ui/ConfirmModal";
-
-// 초를 HH:MM:SS 형식으로 변환
-function formatDuration(seconds: number): string {
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    const s = Math.floor(seconds % 60);
-    return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-}
-
-// 바이트를 MB로 변환
-function formatFileSize(bytes: number): string {
-    const mb = bytes / (1024 * 1024);
-    if (mb < 1024) {
-        return `${mb.toFixed(1)} MB`;
-    }
-    const gb = mb / 1024;
-    return `${gb.toFixed(2)} GB`;
-}
+import { formatDuration, formatBytes } from "../utils/format";
+import { getErrorMessage } from "../utils/error";
 
 export default function Dashboard() {
     const [channels, setChannels] = useState<Channel[]>([]);
@@ -56,8 +40,8 @@ export default function Dashboard() {
             setNewChannelId("");
             toast.success("채널이 추가되었습니다.");
             fetchChannels();
-        } catch (e: any) {
-            toast.error(e.response?.data?.detail || "채널 추가에 실패했습니다.");
+        } catch (e: unknown) {
+            toast.error(getErrorMessage(e, "채널 추가에 실패했습니다."));
         } finally {
             setLoading(false);
         }
@@ -89,8 +73,8 @@ export default function Dashboard() {
             await api.startRecording(id);
             toast.success("녹화를 시작합니다.");
             fetchChannels();
-        } catch (e: any) {
-            toast.error(e.response?.data?.detail || "녹화 시작에 실패했습니다.");
+        } catch (e: unknown) {
+            toast.error(getErrorMessage(e, "녹화 시작에 실패했습니다."));
         } finally {
             setActionLoading(null);
         }
@@ -110,8 +94,8 @@ export default function Dashboard() {
             await api.stopRecording(id);
             toast.success("녹화가 중지되었습니다.");
             fetchChannels();
-        } catch (e: any) {
-            toast.error(e.response?.data?.detail || "녹화 중지에 실패했습니다.");
+        } catch (e: unknown) {
+            toast.error(getErrorMessage(e, "녹화 중지에 실패했습니다."));
         } finally {
             setActionLoading(null);
         }
@@ -227,6 +211,35 @@ interface ChannelCardProps {
 
 function ChannelCard({ channel, onStartRecord, onStopRecord, onRemove, onToggleAutoRecord, isActionLoading }: ChannelCardProps) {
     const displayName = channel.channel_name || channel.channel_id;
+
+    // ── 로컬 1초 타이머: start_time 기준으로 경과 시간 직접 계산 ──
+    const [localDuration, setLocalDuration] = useState(channel.recording?.duration_seconds ?? 0);
+    const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+    useEffect(() => {
+        if (timerRef.current) {
+            clearInterval(timerRef.current);
+            timerRef.current = null;
+        }
+
+        const startTimeStr = channel.recording?.start_time;
+        if (channel.recording?.is_recording && startTimeStr) {
+            // 백엔드에서 받은 start_time 기준으로 현재 경과 시간 즉시 계산
+            const startMs = new Date(startTimeStr).getTime();
+            const tick = () => setLocalDuration(Math.floor((Date.now() - startMs) / 1000));
+            tick(); // 즉시 1회 실행
+            timerRef.current = setInterval(tick, 1000);
+        } else {
+            setLocalDuration(channel.recording?.duration_seconds ?? 0);
+        }
+
+        return () => {
+            if (timerRef.current) {
+                clearInterval(timerRef.current);
+                timerRef.current = null;
+            }
+        };
+    }, [channel.recording?.is_recording, channel.recording?.start_time]);
 
     return (
         <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl overflow-hidden hover:border-zinc-700 transition-all group flex flex-col">
@@ -345,7 +358,7 @@ function ChannelCard({ channel, onStartRecord, onStopRecord, onRemove, onToggleA
                             <div className="flex items-center gap-2">
                                 <div className="flex-1 bg-red-500/10 border border-red-500/20 rounded-lg p-2 flex items-center gap-2 text-xs text-red-400 animate-pulse">
                                     <Video className="w-3 h-3" />
-                                    녹화 중... ({formatDuration(channel.recording.duration_seconds)})
+                                    녹화 중... ({formatDuration(localDuration)})
                                 </div>
                                 <button
                                     onClick={() => onStopRecord(channel.channel_id)}
@@ -365,7 +378,7 @@ function ChannelCard({ channel, onStartRecord, onStopRecord, onRemove, onToggleA
                                 <div className="bg-zinc-900/50 border border-zinc-800 rounded px-2 py-1">
                                     <div className="text-zinc-500">용량</div>
                                     <div className="text-zinc-300 font-mono">
-                                        {formatFileSize(channel.recording.file_size_bytes || 0)}
+                                        {formatBytes(channel.recording.file_size_bytes || 0)}
                                     </div>
                                 </div>
                                 <div className="bg-zinc-900/50 border border-zinc-800 rounded px-2 py-1">

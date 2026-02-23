@@ -19,6 +19,8 @@ import { api, VodTask } from "../api/client";
 import { useToast } from "../components/ui/Toast";
 import { useConfirm } from "../components/ui/ConfirmModal";
 import { clsx } from "clsx";
+import { formatDuration } from "../utils/format";
+import { getErrorMessage } from "../utils/error";
 
 export default function VodDownload() {
     const { tasks, activeCount, addTask, cancelTask, pauseTask, resumeTask, retryTask, clearCompleted, openFileLocation } = useVod();
@@ -38,8 +40,8 @@ export default function VodDownload() {
             await addTask(url);
             setUrl("");
             toast.success("다운로드가 시작되었습니다.");
-        } catch (err: any) {
-            toast.error(err.response?.data?.detail || "다운로드 시작에 실패했습니다.");
+        } catch (err: unknown) {
+            toast.error(getErrorMessage(err, "다운로드 시작에 실패했습니다."));
         } finally {
             setLoading(false);
         }
@@ -223,18 +225,6 @@ export default function VodDownload() {
     );
 }
 
-// ── 헬퍼 함수 ──────────────────────────────────────
-
-function formatETA(seconds: number): string {
-    if (seconds <= 0) return "계산 중...";
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    const s = Math.floor(seconds % 60);
-    if (h > 0) return `${h}시간 ${m}분`;
-    if (m > 0) return `${m}분 ${s}초`;
-    return `${s}초`;
-}
-
 // ── 다운로드 태스크 카드 ─────────────────────────────
 
 interface TaskCardProps {
@@ -340,7 +330,7 @@ function TaskCard({ task, onCancel, onPause, onResume, onRetry, onOpenLocation }
                         </span>
                         {task.eta_seconds > 0 && (
                             <span>
-                                남은 시간: {formatETA(task.eta_seconds)}
+                                남은 시간: {formatDuration(task.eta_seconds, "eta")}
                             </span>
                         )}
                     </div>

@@ -44,7 +44,6 @@ class ChatArchiver:
 
         self._client: Optional[ChatClient] = None
         self._task: Optional[asyncio.Task] = None
-        self._file_handle: Optional[Path] = None
         self._message_count = 0
         self._is_running = False
 
@@ -94,6 +93,14 @@ class ChatArchiver:
         """ChatClient를 실행한다 (내부 메서드)."""
         try:
             await self._client.connect()
+        except asyncio.CancelledError:
+            raise  # 정상 종료 시그널, 상위로 전달
+        except RuntimeError as e:
+            if "Session is closed" in str(e):
+                logger.debug(f"[ChatArchiver] 세션 이미 닫힘, 종료: {self.channel_id}")
+            else:
+                logger.error(f"[ChatArchiver] 런타임 오류: {e}", exc_info=e)
+            self._is_running = False
         except Exception as e:
             logger.error(f"[ChatArchiver] 채팅 연결 실패: {e}", exc_info=e)
             self._is_running = False
@@ -105,17 +112,12 @@ class ChatArchiver:
             message: chzzkpy ChatMessage 객체
         """
         try:
-            # 채팅 데이터 직렬화
+            # 채팅 데이터 직렬화 (profile 원본 데이터는 저장하지 않음)
             chat_data = {
                 "timestamp": datetime.now().isoformat(),
                 "user_id": message.profile.user_id_hash if message.profile else None,
                 "nickname": message.profile.nickname if message.profile else "Unknown",
                 "message": message.content,
-                "profile": {
-                    "nickname": message.profile.nickname if message.profile else None,
-                    "user_role": message.profile.user_role.name if message.profile and message.profile.user_role else None,
-                    "badge": message.profile.badge.badge_name if message.profile and message.profile.badge else None,
-                } if message.profile else None,
             }
 
             # JSONL 형식으로 한 줄씩 추가
@@ -133,7 +135,7 @@ class ChatArchiver:
 
     async def stop(self) -> None:
         """채팅 수집을 중지한다."""
-        if not self._is_running:
+        if not self._is_running and (self._task is None or self._task.done()):
             logger.warning(f"[ChatArchiver] 실행 중이 아닙니다: {self.channel_id}")
             return
 
@@ -141,20 +143,20 @@ class ChatArchiver:
 
         self._is_running = False
 
-        # ChatClient 종료
-        if self._client:
-            try:
-                await self._client.close()
-            except Exception as e:
-                logger.error(f"[ChatArchiver] 클라이언트 종료 중 에러: {e}")
-
-        # Task 취소
+        # 1. Task 먼저 취소 (client.close() 이전에 해야 Session is closed 오류 방지)
         if self._task and not self._task.done():
             self._task.cancel()
             try:
                 await self._task
             except asyncio.CancelledError:
                 pass
+
+        # 2. Task 종료 후 ChatClient 닫기
+        if self._client:
+            try:
+                await self._client.close()
+            except Exception as e:
+                logger.error(f"[ChatArchiver] 클라이언트 종료 중 에러: {e}")
 
         logger.info(f"[ChatArchiver] 채팅 아카이빙 완료: {self.output_path}")
 

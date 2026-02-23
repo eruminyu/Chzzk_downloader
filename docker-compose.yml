@@ -1,0 +1,25 @@
+services:
+  chzzk-recorder:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: chzzk-recorder-pro
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8000}:8000"
+    env_file:
+      - .env
+    environment:
+      # Docker 환경에서는 ffmpeg/streamlink가 시스템에 설치되어 있으므로 PATH만 지정
+      - FFMPEG_PATH=ffmpeg
+    volumes:
+      # 영속성이 필요한 데이터 마운트
+      - ./recordings:/app/recordings   # 녹화 파일
+      - ./data:/app/data               # channels.json 등 설정 파일
+      - ./logs:/app/logs               # 애플리케이션 로그
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s

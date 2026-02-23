@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
     Settings as SettingsIcon,
     Shield,
@@ -6,16 +6,265 @@ import {
     Key,
     Download,
     RefreshCcw,
-    FolderOpen,
     Film,
     Gauge,
     Timer,
     Loader2,
     MessageSquare,
     MessageCircle,
+    FolderOpen,
+    Folder,
+    HardDrive,
+    ArrowLeft,
+    ChevronRight,
+    X,
 } from "lucide-react";
-import { api, Settings as SettingsType } from "../api/client";
+import { api, Settings as SettingsType, BrowseDirsResponse, DirEntry } from "../api/client";
 import { useToast } from "../components/ui/Toast";
+import { getErrorMessage } from "../utils/error";
+
+// ── DirBrowserModal ──────────────────────────────────────
+
+interface DirBrowserModalProps {
+    initialPath?: string;
+    onSelect: (path: string) => void;
+    onClose: () => void;
+}
+
+function DirBrowserModal({ initialPath, onSelect, onClose }: DirBrowserModalProps) {
+    const [data, setData] = useState<BrowseDirsResponse | null>(null);
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+
+    const navigate = useCallback(async (path?: string) => {
+        setLoading(true);
+        setError(null);
+        try {
+            const res = await api.browseDirs(path);
+            setData(res);
+        } catch {
+            setError("디렉토리를 불러올 수 없습니다.");
+        } finally {
+            setLoading(false);
+        }
+    }, []);
+
+    useEffect(() => {
+        navigate(initialPath || undefined);
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+    useEffect(() => {
+        const handler = (e: KeyboardEvent) => {
+            if (e.key === "Escape") onClose();
+        };
+        window.addEventListener("keydown", handler);
+        return () => window.removeEventListener("keydown", handler);
+    }, [onClose]);
+
+    const isDrive = (path: string) => /^[A-Z]:\\$/.test(path);
+
+    return (
+        <div
+            className="fixed inset-0 z-[9998] flex items-center justify-center"
+            onClick={onClose}
+        >
+            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+
+            <div
+                className="relative bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl
+                           w-full max-w-lg mx-4 flex flex-col"
+                style={{ maxHeight: "70vh" }}
+                onClick={(e) => e.stopPropagation()}
+            >
+                {/* Header */}
+                <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800">
+                    <h3 className="text-white font-semibold text-base flex items-center gap-2">
+                        <Folder className="w-4 h-4 text-green-500" />
+                        폴더 선택
+                    </h3>
+                    <button
+                        onClick={onClose}
+                        className="p-1 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
+                    >
+                        <X className="w-4 h-4" />
+                    </button>
+                </div>
+
+                {/* Current Path */}
+                <div className="px-5 py-2 bg-zinc-950 border-b border-zinc-800">
+                    <p className="text-xs text-zinc-400 font-mono truncate">
+                        {data?.current || "드라이브 선택"}
+                    </p>
+                </div>
+
+                {/* Dir List */}
+                <div className="flex-1 overflow-y-auto py-1 min-h-0">
+                    {loading && (
+                        <div className="flex items-center justify-center py-10">
+                            <Loader2 className="w-5 h-5 animate-spin text-zinc-500" />
+                        </div>
+                    )}
+
+                    {error && (
+                        <p className="text-red-400 text-sm text-center py-8">{error}</p>
+                    )}
+
+                    {!loading && !error && data && (
+                        <>
+                            {/* 상위 폴더로 */}
+                            {data.parent !== null && (
+                                <button
+                                    onClick={() => navigate(data.parent ?? undefined)}
+                                    className="w-full flex items-center gap-3 px-5 py-2.5 text-left
+                                               text-zinc-400 hover:bg-zinc-800 hover:text-white
+                                               transition-colors text-sm"
+                                >
+                                    <ArrowLeft className="w-4 h-4 shrink-0" />
+                                    <span className="font-mono">..</span>
+                                </button>
+                            )}
+
+                            {data.dirs.length === 0 && (
+                                <p className="text-zinc-600 text-sm text-center py-8">
+                                    하위 폴더 없음
+                                </p>
+                            )}
+
+                            {data.dirs.map((dir: DirEntry) => (
+                                <button
+                                    key={dir.path}
+                                    onClick={() => navigate(dir.path)}
+                                    className="w-full flex items-center gap-3 px-5 py-2.5 text-left
+                                               text-zinc-300 hover:bg-zinc-800 hover:text-white
+                                               transition-colors text-sm group"
+                                >
+                                    {isDrive(dir.path) ? (
+                                        <HardDrive className="w-4 h-4 shrink-0 text-zinc-500 group-hover:text-green-500 transition-colors" />
+                                    ) : (
+                                        <Folder className="w-4 h-4 shrink-0 text-zinc-500 group-hover:text-green-500 transition-colors" />
+                                    )}
+                                    <span className="flex-1 truncate">{dir.name}</span>
+                                    <ChevronRight className="w-3 h-3 text-zinc-600 group-hover:text-zinc-400 shrink-0" />
+                                </button>
+                            ))}
+                        </>
+                    )}
+                </div>
+
+                {/* Footer */}
+                <div className="px-5 py-4 border-t border-zinc-800 flex gap-3">
+                    <button
+                        onClick={onClose}
+                        className="flex-1 py-2 rounded-lg text-sm font-medium text-zinc-300
+                                   bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 transition-colors"
+                    >
+                        취소
+                    </button>
+                    <button
+                        onClick={() => {
+                            if (data?.current) {
+                                onSelect(data.current);
+                                onClose();
+                            }
+                        }}
+                        disabled={!data?.current}
+                        className="flex-1 py-2 rounded-lg text-sm font-bold text-white
+                                   bg-green-600 hover:bg-green-500 disabled:bg-zinc-700
+                                   disabled:text-zinc-500 transition-colors"
+                    >
+                        이 폴더 선택
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+// ── DirInput ─────────────────────────────────────────────
+
+interface DirInputProps {
+    value: string;
+    onChange: (v: string) => void;
+    placeholder?: string;
+    focusBorderColor?: string;
+}
+
+function DirInput({
+    value,
+    onChange,
+    placeholder = "경로 입력...",
+    focusBorderColor = "focus:border-green-500",
+}: DirInputProps) {
+    const [showBrowser, setShowBrowser] = useState(false);
+
+    return (
+        <>
+            <div className="flex gap-2">
+                <input
+                    type="text"
+                    value={value}
+                    onChange={(e) => onChange(e.target.value)}
+                    className={`flex-1 bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-2
+                                text-white font-mono text-sm focus:outline-none ${focusBorderColor}`}
+                    placeholder={placeholder}
+                />
+                <button
+                    type="button"
+                    onClick={() => setShowBrowser(true)}
+                    className="px-3 py-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700
+                               rounded-lg text-zinc-400 hover:text-white transition-colors
+                               flex items-center gap-1.5 text-sm shrink-0"
+                    title="폴더 찾아보기"
+                >
+                    <FolderOpen className="w-4 h-4" />
+                    <span className="hidden sm:inline">찾아보기</span>
+                </button>
+            </div>
+
+            {showBrowser && (
+                <DirBrowserModal
+                    initialPath={value || undefined}
+                    onSelect={onChange}
+                    onClose={() => setShowBrowser(false)}
+                />
+            )}
+        </>
+    );
+}
+
+// ── ToggleSwitch ─────────────────────────────────────────
+
+interface ToggleSwitchProps {
+    checked: boolean;
+    onChange: (v: boolean) => void;
+    activeColor?: string;
+    focusRingColor?: string;
+}
+
+function ToggleSwitch({
+    checked,
+    onChange,
+    activeColor = "bg-green-600",
+    focusRingColor = "focus:ring-green-500",
+}: ToggleSwitchProps) {
+    return (
+        <button
+            type="button"
+            onClick={() => onChange(!checked)}
+            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors
+                        focus:outline-none focus:ring-2 ${focusRingColor}
+                        focus:ring-offset-2 focus:ring-offset-zinc-900
+                        ${checked ? activeColor : "bg-zinc-700"}`}
+        >
+            <span
+                className={`inline-block h-4 w-4 transform rounded-full bg-white
+                            transition-transform ${checked ? "translate-x-6" : "translate-x-1"}`}
+            />
+        </button>
+    );
+}
+
+// ── Settings 메인 컴포넌트 ────────────────────────────────
 
 export default function Settings() {
     const [settings, setSettings] = useState<SettingsType | null>(null);
@@ -35,6 +284,9 @@ export default function Settings() {
     const [monitorInterval, setMonitorInterval] = useState(30);
     const [outputFormat, setOutputFormat] = useState("ts");
     const [recordingQuality, setRecordingQuality] = useState("best");
+    const [splitDownloadDirs, setSplitDownloadDirs] = useState(false);
+    const [vodChzzkDir, setVodChzzkDir] = useState("");
+    const [vodExternalDir, setVodExternalDir] = useState("");
     const [genSaving, setGenSaving] = useState(false);
 
     // ── VOD settings state ──
@@ -71,6 +323,9 @@ export default function Settings() {
             setVodMaxSpeed(data.vod_max_speed);
             setChatArchiveEnabled(data.chat_archive_enabled);
             setDiscordChannelId(data.discord_notification_channel_id || "");
+            setSplitDownloadDirs(data.split_download_dirs ?? false);
+            setVodChzzkDir(data.vod_chzzk_dir ?? "");
+            setVodExternalDir(data.vod_external_dir ?? "");
         } catch {
             toast.error("설정을 불러오는 데 실패했습니다.");
         }
@@ -97,8 +352,8 @@ export default function Settings() {
             } else {
                 toast.error("쿠키가 유효하지 않습니다.");
             }
-        } catch (e: any) {
-            toast.error(e.response?.data?.detail || "검증에 실패했습니다.");
+        } catch (e: unknown) {
+            toast.error(getErrorMessage(e, "검증에 실패했습니다."));
         }
     };
 
@@ -125,11 +380,14 @@ export default function Settings() {
                 monitor_interval: monitorInterval,
                 output_format: outputFormat,
                 recording_quality: recordingQuality,
+                split_download_dirs: splitDownloadDirs,
+                vod_chzzk_dir: vodChzzkDir,
+                vod_external_dir: vodExternalDir,
             });
             toast.success("일반 설정이 저장되었습니다.");
             loadSettings();
-        } catch (e: any) {
-            toast.error(e.response?.data?.detail || "일반 설정 저장에 실패했습니다.");
+        } catch (e: unknown) {
+            toast.error(getErrorMessage(e, "일반 설정 저장에 실패했습니다."));
         } finally {
             setGenSaving(false);
         }
@@ -146,8 +404,8 @@ export default function Settings() {
             });
             toast.success("VOD 설정이 저장되었습니다.");
             loadSettings();
-        } catch (e: any) {
-            toast.error(e.response?.data?.detail || "VOD 설정 저장에 실패했습니다.");
+        } catch (e: unknown) {
+            toast.error(getErrorMessage(e, "VOD 설정 저장에 실패했습니다."));
         } finally {
             setVodSaving(false);
         }
@@ -162,8 +420,8 @@ export default function Settings() {
             });
             toast.success("채팅 설정이 저장되었습니다.");
             loadSettings();
-        } catch (e: any) {
-            toast.error(e.response?.data?.detail || "채팅 설정 저장에 실패했습니다.");
+        } catch (e: unknown) {
+            toast.error(getErrorMessage(e, "채팅 설정 저장에 실패했습니다."));
         } finally {
             setChatSaving(false);
         }
@@ -179,37 +437,13 @@ export default function Settings() {
             });
             toast.success("Discord 설정이 저장되었습니다. 재시작 후 적용됩니다.");
             loadSettings();
-            // 보안을 위해 토큰 입력 필드 비우기
             setDiscordBotToken("");
-        } catch (e: any) {
-            toast.error(e.response?.data?.detail || "Discord 설정 저장에 실패했습니다.");
+        } catch (e: unknown) {
+            toast.error(getErrorMessage(e, "Discord 설정 저장에 실패했습니다."));
         } finally {
             setDiscordSaving(false);
         }
     };
-
-    // ── Select component ──
-    const Select = ({
-        value,
-        onChange,
-        options,
-    }: {
-        value: string;
-        onChange: (v: string) => void;
-        options: { value: string; label: string }[];
-    }) => (
-        <select
-            value={value}
-            onChange={(e) => onChange(e.target.value)}
-            className="w-full bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-green-500 appearance-none cursor-pointer"
-        >
-            {options.map((o) => (
-                <option key={o.value} value={o.value}>
-                    {o.label}
-                </option>
-            ))}
-        </select>
-    );
 
     return (
         <div className="space-y-6">
@@ -234,22 +468,73 @@ export default function Settings() {
                             일반 설정
                         </h3>
 
-                        {/* Download Directory */}
+                        {/* 기본 저장 경로 */}
                         <div className="space-y-2">
                             <label className="text-sm font-medium text-zinc-300 flex items-center gap-2">
                                 <FolderOpen className="w-4 h-4" />
                                 저장 경로
                             </label>
-                            <input
-                                type="text"
+                            <DirInput
                                 value={downloadDir}
-                                onChange={(e) => setDownloadDir(e.target.value)}
-                                className="w-full bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-green-500"
+                                onChange={setDownloadDir}
                                 placeholder="예: E:\recordings"
                             />
                             <p className="text-xs text-zinc-500">
-                                녹화 파일이 저장될 디렉토리 경로입니다.
+                                라이브 녹화 + 채팅 로그가 저장되는 기본 경로입니다.
                             </p>
+                        </div>
+
+                        {/* 분할 저장 경로 토글 */}
+                        <div className="space-y-3">
+                            <div className="flex items-center justify-between">
+                                <label className="text-sm font-medium text-zinc-300">
+                                    분할 저장 경로 사용
+                                </label>
+                                <ToggleSwitch
+                                    checked={splitDownloadDirs}
+                                    onChange={setSplitDownloadDirs}
+                                />
+                            </div>
+                            <p className="text-xs text-zinc-500">
+                                활성화 시 콘텐츠 종류별로 저장 경로를 분리할 수 있습니다.
+                            </p>
+
+                            {/* 펼침 영역 */}
+                            {splitDownloadDirs && (
+                                <div className="space-y-4 pl-4 border-l-2 border-zinc-700 pt-1">
+                                    {/* 치지직 VOD/클립 */}
+                                    <div className="space-y-2">
+                                        <label className="text-xs font-medium text-zinc-400 flex items-center gap-1.5">
+                                            <Folder className="w-3.5 h-3.5" />
+                                            치지직 VOD / 클립 저장 경로
+                                        </label>
+                                        <DirInput
+                                            value={vodChzzkDir}
+                                            onChange={setVodChzzkDir}
+                                            placeholder="비어있으면 기본 저장 경로 사용"
+                                        />
+                                        <p className="text-xs text-zinc-600">
+                                            chzzk.naver.com URL 다운로드에 적용됩니다.
+                                        </p>
+                                    </div>
+
+                                    {/* 외부 다운로드 */}
+                                    <div className="space-y-2">
+                                        <label className="text-xs font-medium text-zinc-400 flex items-center gap-1.5">
+                                            <Folder className="w-3.5 h-3.5" />
+                                            외부 다운로드 저장 경로 (유튜브 등)
+                                        </label>
+                                        <DirInput
+                                            value={vodExternalDir}
+                                            onChange={setVodExternalDir}
+                                            placeholder="비어있으면 기본 저장 경로 사용"
+                                        />
+                                        <p className="text-xs text-zinc-600">
+                                            유튜브 등 외부 URL(yt-dlp) 다운로드에 적용됩니다.
+                                        </p>
+                                    </div>
+                                </div>
+                            )}
                         </div>
 
                         {/* Monitor Interval */}
@@ -487,23 +772,14 @@ export default function Settings() {
                                 미완료 파일 보관 (.part)
                             </label>
                             <div className="flex items-center gap-3">
-                                <button
-                                    type="button"
-                                    onClick={() => setKeepParts(!keepParts)}
-                                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 focus:ring-offset-zinc-900 ${
-                                        keepParts ? "bg-green-600" : "bg-zinc-700"
-                                    }`}
-                                >
-                                    <span
-                                        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                                            keepParts ? "translate-x-6" : "translate-x-1"
-                                        }`}
-                                    />
-                                </button>
+                                <ToggleSwitch
+                                    checked={keepParts}
+                                    onChange={setKeepParts}
+                                    activeColor="bg-green-600"
+                                    focusRingColor="focus:ring-green-500"
+                                />
                                 <span className="text-sm text-zinc-500">
-                                    {keepParts
-                                        ? "취소/오류 시 보관"
-                                        : "취소 시 삭제"}
+                                    {keepParts ? "취소/오류 시 보관" : "취소 시 삭제"}
                                 </span>
                             </div>
                         </div>
@@ -551,25 +827,17 @@ export default function Settings() {
                             채팅 아카이빙
                         </h3>
 
-                        {/* Chat Archive Toggle */}
                         <div>
                             <label className="block text-sm font-medium text-zinc-300 mb-2">
                                 실시간 채팅 저장
                             </label>
                             <div className="flex items-center gap-3">
-                                <button
-                                    type="button"
-                                    onClick={() => setChatArchiveEnabled(!chatArchiveEnabled)}
-                                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-offset-2 focus:ring-offset-zinc-900 ${
-                                        chatArchiveEnabled ? "bg-cyan-600" : "bg-zinc-700"
-                                    }`}
-                                >
-                                    <span
-                                        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                                            chatArchiveEnabled ? "translate-x-6" : "translate-x-1"
-                                        }`}
-                                    />
-                                </button>
+                                <ToggleSwitch
+                                    checked={chatArchiveEnabled}
+                                    onChange={setChatArchiveEnabled}
+                                    activeColor="bg-cyan-600"
+                                    focusRingColor="focus:ring-cyan-500"
+                                />
                                 <span className="text-sm text-zinc-500">
                                     {chatArchiveEnabled
                                         ? "녹화 시 채팅 자동 저장"
@@ -581,7 +849,6 @@ export default function Settings() {
                             </p>
                         </div>
 
-                        {/* Save Button */}
                         <button
                             onClick={handleSaveChatSettings}
                             disabled={chatSaving}
@@ -603,7 +870,6 @@ export default function Settings() {
                             Discord Bot 알림
                         </h3>
 
-                        {/* Bot Token Input */}
                         <div>
                             <label className="block text-sm font-medium text-zinc-300 mb-2">
                                 Bot 토큰
@@ -620,7 +886,6 @@ export default function Settings() {
                             </p>
                         </div>
 
-                        {/* Channel ID Input */}
                         <div>
                             <label className="block text-sm font-medium text-zinc-300 mb-2">
                                 알림 채널 ID
@@ -637,7 +902,6 @@ export default function Settings() {
                             </p>
                         </div>
 
-                        {/* Bot Status */}
                         <div className="flex items-center gap-2 text-sm">
                             <div
                                 className={`w-2 h-2 rounded-full ${settings?.discord_bot_configured ? "bg-green-500" : "bg-zinc-600"}`}
@@ -649,7 +913,6 @@ export default function Settings() {
                             </span>
                         </div>
 
-                        {/* Save Button */}
                         <button
                             onClick={handleSaveDiscordSettings}
                             disabled={discordSaving}
@@ -713,5 +976,31 @@ export default function Settings() {
                 </div>
             </div>
         </div>
+    );
+}
+
+// ── Select (파일 스코프 컴포넌트) ────────────────────────
+
+function Select({
+    value,
+    onChange,
+    options,
+}: {
+    value: string;
+    onChange: (v: string) => void;
+    options: { value: string; label: string }[];
+}) {
+    return (
+        <select
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            className="w-full bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-green-500 appearance-none cursor-pointer"
+        >
+            {options.map((o) => (
+                <option key={o.value} value={o.value}>
+                    {o.label}
+                </option>
+            ))}
+        </select>
     );
 }

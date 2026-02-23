@@ -37,6 +37,17 @@ class StreamLinkEngine:
     def __init__(self, auth: Optional[AuthManager] = None) -> None:
         self._auth = auth or AuthManager()
 
+    def _create_session(self) -> streamlink.Streamlink:
+        """인증 쿠키와 HLS 옵션이 설정된 Streamlink 세션을 생성한다."""
+        session = streamlink.Streamlink()
+        sl_options = self._auth.get_streamlink_options()
+        for key, value in sl_options.items():
+            session.set_option(key, value)
+        session.set_option("hls-live-edge", 3)
+        session.set_option("hls-segment-attempts", 5)
+        session.set_option("hls-segment-timeout", 15.0)
+        return session
+
     async def check_live_status(self, channel_id: str) -> dict:
         """치지직 API를 통해 채널의 라이브 상태를 확인한다.
 
@@ -81,86 +92,22 @@ class StreamLinkEngine:
         Hybrid Pipe Engine에서 FFmpeg의 stdin으로 데이터를 공급하는 데 사용됨.
         """
         live_url = CHZZK_LIVE_URL.format(channel_id=channel_id)
-        
-        session = streamlink.Streamlink()
-        sl_options = self._auth.get_streamlink_options()
-        for key, value in sl_options.items():
-            session.set_option(key, value)
-
+        session = self._create_session()
         streams = session.streams(live_url)
         if not streams:
             raise ChannelOfflineError(f"채널 '{channel_id}'이(가) 오프라인입니다.")
-            
+
         if quality not in streams:
             quality = "best"
-            
+
         return streams[quality]
-
-    def get_stream_url(
-        self,
-        channel_id: str,
-        quality: str = "best",
-    ) -> str:
-        """Streamlink으로 HLS 스트림 URL을 추출한다.
-
-        Args:
-            channel_id: 치지직 채널 ID.
-            quality: 화질 (best, worst, 1080p, 720p 등).
-
-        Returns:
-            HLS 스트림 URL 문자열.
-
-        Raises:
-            ChannelOfflineError: 채널이 오프라인일 때.
-            StreamExtractError: 스트림 URL 추출 실패 시.
-        """
-        live_url = CHZZK_LIVE_URL.format(channel_id=channel_id)
-        logger.info(f"스트림 URL 추출 시작: {channel_id} (화질: {quality})")
-
-        try:
-            session = streamlink.Streamlink()
-
-            # 인증 쿠키 주입
-            sl_options = self._auth.get_streamlink_options()
-            for key, value in sl_options.items():
-                session.set_option(key, value)
-
-            streams = session.streams(live_url)
-
-            if not streams:
-                raise ChannelOfflineError(
-                    f"채널 '{channel_id}'이(가) 오프라인이거나 스트림을 찾을 수 없습니다."
-                )
-
-            if quality not in streams:
-                available = ", ".join(streams.keys())
-                logger.warning(
-                    f"화질 '{quality}' 사용 불가. 가용 화질: {available}. 'best'로 대체합니다."
-                )
-                quality = "best"
-
-            stream = streams[quality]
-            stream_url = stream.url
-            logger.info(f"스트림 URL 추출 완료: {stream_url[:80]}...")
-            return stream_url
-
-        except streamlink.NoPluginError:
-            raise StreamExtractError(
-                f"Streamlink에서 '{live_url}'을(를) 처리할 플러그인을 찾을 수 없습니다."
-            )
-        except streamlink.PluginError as e:
-            raise StreamExtractError(f"Streamlink 플러그인 오류: {e}")
 
     def get_available_qualities(self, channel_id: str) -> list[str]:
         """사용 가능한 화질 목록을 반환한다."""
         live_url = CHZZK_LIVE_URL.format(channel_id=channel_id)
 
         try:
-            session = streamlink.Streamlink()
-            sl_options = self._auth.get_streamlink_options()
-            for key, value in sl_options.items():
-                session.set_option(key, value)
-
+            session = self._create_session()
             streams = session.streams(live_url)
             return list(streams.keys())
         except Exception as e:

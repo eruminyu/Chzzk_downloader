@@ -120,10 +120,6 @@ class RecorderService:
         """특정 VOD 다운로드 작업의 상태를 반환한다."""
         return self._vod_engine.get_task_status(task_id)
 
-    def get_vod_status(self) -> dict:
-        """하위 호환성을 위한 메서드. 첫 번째 작업의 상태를 반환한다."""
-        return self._vod_engine.get_status()
-
     def cancel_vod(self, task_id: str) -> dict:
         """VOD 다운로드를 취소한다."""
         logger.info(f"[Service] VOD 다운로드 취소 요청: {task_id}")

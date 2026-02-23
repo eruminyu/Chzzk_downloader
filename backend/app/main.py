@@ -5,18 +5,18 @@ Lifespan 컨텍스트 매니저를 통해 Conductor 라이프사이클을 관리
 
 from __future__ import annotations
 
-import asyncio
 import sys
+from pathlib import Path
 
-# 윈도우에서 subprocess 실행을 위해 ProactorEventLoopPolicy 설정 (Python 3.8+ 기본이지만 명시적 설정 권장)
-if sys.platform == "win32":
-    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+# NOTE: Windows 이벤트 루프 정책은 app/__init__.py에서 설정됨
 
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.core.config import get_settings
 from app.core.logger import logger
@@ -29,6 +29,9 @@ from app.services.discord_bot import DiscordBotService
 from app.api.stream import router as stream_router
 from app.api.vod import router as vod_router
 from app.api.settings import router as settings_router
+from app.api.chat import router as chat_router
+from app.api.stats import router as stats_router
+from app.api.setup import router as setup_router
 
 # ── 전역 인스턴스 ────────────────────────────────────────
 _recorder_service: RecorderService | None = None
@@ -91,6 +94,38 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("👋 Goodbye!")
 
 
+# ── 정적 파일 경로 ─────────────────────────────────────────
+# PyInstaller onefile → sys._MEIPASS
+# PyInstaller onedir  → sys.executable 옆 _internal/app/static
+# 일반 실행            → 현재 파일 기준
+
+def _resolve_static_dir() -> Path:
+    """PyInstaller 빌드 방식에 관계없이 static 폴더를 찾는다."""
+    candidates = []
+
+    # 1) PyInstaller onefile: _MEIPASS 사용
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        candidates.append(Path(meipass) / "app" / "static")
+
+    # 2) PyInstaller onedir: exe 옆 _internal 폴더
+    if getattr(sys, "frozen", False):
+        exe_dir = Path(sys.executable).parent
+        candidates.append(exe_dir / "_internal" / "app" / "static")
+
+    # 3) 일반 실행: 현재 파일 기준
+    candidates.append(Path(__file__).resolve().parent / "static")
+
+    for path in candidates:
+        if path.exists() and (path / "index.html").exists():
+            return path
+
+    # 어디에도 없으면 기본값 반환 (경고는 아래에서 처리)
+    return candidates[-1]
+
+STATIC_DIR = _resolve_static_dir()
+
+
 # ── FastAPI 앱 ───────────────────────────────────────────
 app = FastAPI(
     title="Chzzk-Recorder-Pro",
@@ -99,7 +134,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS 설정 (프론트엔드 연동용)
+# CORS 설정 (개발 환경 프록시 연동용 — 프로덕션에서는 동일 오리진이므로 실질적 영향 없음)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -112,22 +147,24 @@ app.add_middleware(
 app.include_router(stream_router)
 app.include_router(vod_router)
 app.include_router(settings_router)
+app.include_router(chat_router)
+app.include_router(stats_router)
+app.include_router(setup_router)
 
 
 # ── 헬스 체크 ────────────────────────────────────────────
-@app.get("/", tags=["Health"])
-async def root():
+@app.get("/health", tags=["Health"])
+async def health_check_root():
     """헬스 체크 엔드포인트."""
     return {"message": "Chzzk-Recorder-Pro Engine Started"}
 
 
-@app.get("/health", tags=["Health"])
+@app.get("/health/detail", tags=["Health"])
 async def health_check():
     """상세 헬스 체크."""
     settings = get_settings()
-    service = None
     try:
-        service = get_recorder_service()
+        get_recorder_service()
     except RuntimeError:
         pass
 
@@ -137,6 +174,32 @@ async def health_check():
         "version": "0.1.0",
         "authenticated": bool(settings.nid_aut and settings.nid_ses),
     }
+
+
+# ── 프론트엔드 SPA 서빙 ────────────────────────────────────
+# API 라우터 등록 이후에 마운트해야 API가 우선 처리됨
+if STATIC_DIR.exists():
+    # /assets 등 정적 리소스 서빙
+    app.mount("/assets", StaticFiles(directory=STATIC_DIR / "assets"), name="assets")
+
+    @app.get("/", include_in_schema=False)
+    async def serve_spa_root():
+        """SPA 루트 페이지 반환."""
+        return FileResponse(STATIC_DIR / "index.html")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def serve_spa_fallback(request: Request, full_path: str):
+        """SPA 클라이언트 라우팅 지원 — API 경로가 아닌 모든 요청을 index.html로 반환."""
+        # API / health 경로는 404로 반환 (이미 등록된 라우터가 처리)
+        if full_path.startswith(("api/", "health", "docs", "openapi")):
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404, detail="Not Found")
+        return FileResponse(STATIC_DIR / "index.html")
+else:
+    logger.warning(
+        "⚠️  static 폴더를 찾을 수 없습니다. 개발 환경(Vite dev server)으로 동작합니다. "
+        "배포 시 'npm run build'를 먼저 실행하세요."
+    )
 
 
 if __name__ == "__main__":

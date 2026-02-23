@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import json
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
@@ -64,6 +65,9 @@ class Conductor:
         self._running = False
         self._persistence_path = Path("data/channels.json")
         self._discord_bot = discord_bot
+        # 라이브 감지 이력: channel_id → 날짜 문자열 set (하루 1회 카운트)
+        self._live_detections: dict[str, set[str]] = {}
+        self._live_history_path = Path("data/live_history.json")
         self._load_persistence()
 
     @property
@@ -216,6 +220,11 @@ class Conductor:
                 task.thumbnail_url = status.get("thumbnail_url")
                 task.profile_image_url = status.get("profile_image_url")
 
+                # ── 라이브 감지 날짜 기록 (하루 1회, 날짜 경계 자동 처리) ──
+                if status["is_live"]:
+                    today = datetime.now().strftime("%Y-%m-%d")
+                    self._live_detections.setdefault(channel_id, set()).add(today)
+
                 # ── 방송 시작 감지 ──
                 if status["is_live"] and not was_live:
                     logger.info(
@@ -287,6 +296,10 @@ class Conductor:
                     },
                 )
 
+        # 녹화 완료 이력 저장
+        if pipe is not None and pipe.state == RecordingState.COMPLETED:
+            self._save_live_history(channel_id, task, pipe.get_status())
+
         # 채팅 아카이빙 중지
         archiver = task.chat_archiver
         if archiver is not None:
@@ -329,9 +342,9 @@ class Conductor:
             # ── 채팅 아카이빙 시작 (설정 활성화 시) ──
             if settings.chat_archive_enabled:
                 try:
-                    # 녹화 파일과 같은 디렉토리에 .jsonl 파일 생성
+                    # 녹화 파일과 같은 이름으로 .jsonl 저장 (예: [스트리머] 제목.ts → .jsonl)
                     recording_status = pipeline.get_status()
-                    output_file = recording_status.get("output_file")
+                    output_file = recording_status.get("output_path")
                     if output_file:
                         chat_file = Path(output_file).with_suffix(".jsonl")
                         archiver = ChatArchiver(
@@ -372,7 +385,7 @@ class Conductor:
             status = await self._engine.check_live_status(channel_id)
             task.channel_name = status.get("channel_name")
             task.title = status.get("title")
-        except:
+        except Exception:
             pass
 
         await self._start_recording(channel_id)
@@ -421,3 +434,53 @@ class Conductor:
 
             result.append(status)
         return result
+
+    # ── 라이브 이력 관리 ─────────────────────────────────
+
+    def _save_live_history(self, channel_id: str, task: ChannelTask, pipe_status: dict) -> None:
+        """라이브 녹화 완료 이력을 JSON 파일에 저장한다."""
+        try:
+            self._live_history_path.parent.mkdir(parents=True, exist_ok=True)
+            history: list[dict] = []
+            if self._live_history_path.exists():
+                with open(self._live_history_path, "r", encoding="utf-8") as f:
+                    history = json.load(f)
+
+            history.append({
+                "channel_id": channel_id,
+                "channel_name": task.channel_name or channel_id,
+                "started_at": pipe_status.get("start_time"),
+                "ended_at": datetime.now().isoformat(),
+                "duration_seconds": pipe_status.get("duration_seconds", 0),
+                "file_size_bytes": pipe_status.get("file_size_bytes", 0),
+                "output_path": pipe_status.get("output_path"),
+            })
+
+            with open(self._live_history_path, "w", encoding="utf-8") as f:
+                json.dump(history, f, ensure_ascii=False, indent=2)
+
+            logger.debug(f"[{channel_id}] 라이브 이력 저장 완료.")
+        except Exception as e:
+            logger.error(f"[{channel_id}] 라이브 이력 저장 실패: {e}")
+
+    def get_live_history(self) -> list[dict]:
+        """저장된 라이브 녹화 이력을 반환한다."""
+        if not self._live_history_path.exists():
+            return []
+        try:
+            with open(self._live_history_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return []
+
+    def get_live_detections(self) -> dict[str, int]:
+        """채널별 라이브 감지 횟수를 반환한다 (최근 30일 기준, 하루 1회 카운트).
+
+        Returns:
+            { channel_id: 최근 30일 내 감지된 날짜 수 }
+        """
+        cutoff = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+        return {
+            cid: sum(1 for d in dates if d >= cutoff)
+            for cid, dates in self._live_detections.items()
+        }

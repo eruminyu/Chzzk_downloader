@@ -28,12 +28,22 @@ bin/
 # Claude Code
 .claude/
 
+# PyInstaller 빌드 산출물
+dist/
+build/
+*.spec
 
+# 프론트엔드 빌드 결과 (backend에 복사되는 static)
+backend/app/static/
 
+# 생성된 아이콘
+assets/icon.png
+assets/icon.ico
 
 # Runtime data & logs
 backend/data/
 backend/logs/
+data/
 logs/
 *.log
 
@@ -41,7 +51,14 @@ logs/
 .DS_Store
 Thumbs.db
 
-# Recordings
+# Recordings & test recordings
+recordings/
+backend/recordings/
+backend/test_recordings/
 *.ts
 *.mp4
 *.mkv
+
+# Test cache
+.pytest_cache/
+backend/.pytest_cache/

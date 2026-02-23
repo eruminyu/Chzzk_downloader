@@ -8,7 +8,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
-from pathlib import Path
 from app.core.config import get_settings
 from app.core.logger import logger
 
@@ -101,32 +100,5 @@ class AuthManager:
 
     def _persist_env(self, updates: dict[str, str]) -> None:
         """.env 파일의 특정 키 값을 업데이트한다."""
-        import os
-        env_path = Path(".env")
-        if not env_path.exists():
-            # .venv 등 환경에 따라 경로가 다를 수 있으므로 root relative 체크
-            env_path = Path("backend/.env")
-            if not env_path.exists():
-                return
-
-        try:
-            lines = env_path.read_text(encoding="utf-8").splitlines()
-            new_lines = []
-            keys_to_update = set(updates.keys())
-            
-            for line in lines:
-                if "=" in line:
-                    key = line.split("=")[0].strip()
-                    if key in keys_to_update:
-                        new_lines.append(f"{key}={updates[key]}")
-                        keys_to_update.remove(key)
-                        continue
-                new_lines.append(line)
-            
-            # 없는 키는 하단에 추가
-            for key in keys_to_update:
-                new_lines.append(f"{key}={updates[key]}")
-                
-            env_path.write_text("\n".join(new_lines), encoding="utf-8")
-        except Exception as e:
-            logger.error(f".env 파일 업데이트 실패: {e}")
+        from app.core.utils import update_env_file
+        update_env_file(updates)

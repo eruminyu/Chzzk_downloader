@@ -273,23 +273,36 @@ class FFmpegPipeline:
 
     async def _run_feeder(self, stream_obj: object) -> None:
         """Streamlink 데이터를 FFmpeg stdin으로 전달한다."""
+        max_open_retries = 3
+        for attempt in range(1, max_open_retries + 1):
+            try:
+                # streamlink.Stream.open()은 blocking이므로 스레드에서 실행
+                self._stream_fd = await asyncio.to_thread(lambda: stream_obj.open())  # type: ignore
+                logger.info(f"[{self._channel_id}] 스트림 열기 성공 (시도 {attempt}/{max_open_retries})")
+                break
+            except Exception as e:
+                logger.warning(f"[{self._channel_id}] 스트림 열기 실패 (시도 {attempt}/{max_open_retries}): {e}")
+                if attempt < max_open_retries:
+                    await asyncio.sleep(3.0)
+                else:
+                    logger.error(f"[{self._channel_id}] 스트림 열기 최종 실패. 녹화를 종료합니다.")
+                    self._state = RecordingState.ERROR
+                    return
+
         try:
-            # streamlink.Stream.open()은 blocking이므로 스레드에서 실행
-            self._stream_fd = await asyncio.to_thread(lambda: stream_obj.open()) # type: ignore
-            
             while self._state == RecordingState.RECORDING:
                 # 데이터 읽기 (128KB 덩어리)
-                data = await asyncio.to_thread(lambda: self._stream_fd.read(1024 * 128)) # type: ignore
+                data = await asyncio.to_thread(lambda: self._stream_fd.read(1024 * 128))  # type: ignore
                 if not data:
                     logger.info(f"[{self._channel_id}] 스트림 소스 종료 (EOF).")
                     break
-                
+
                 if self._process and self._process.stdin:
                     self._process.stdin.write(data)
                     await self._process.stdin.drain()
                 else:
                     break
-                    
+
         except asyncio.CancelledError:
             pass
         except Exception as e:
@@ -298,12 +311,12 @@ class FFmpegPipeline:
             if self._stream_fd:
                 try:
                     self._stream_fd.close()
-                except:
+                except Exception:
                     pass
             if self._process and self._process.stdin and not self._process.stdin.is_closing():
                 try:
                     self._process.stdin.close()
-                except:
+                except Exception:
                     pass
 
     async def stop_recording(self) -> None:
@@ -413,10 +426,5 @@ class FFmpegPipeline:
 
     def _clean_filename(self, name: str) -> str:
         """파일명에서 사용할 수 없는 특수문자를 제거한다."""
-        import re
-        # Windows 파일명 금지 문자: \ / : * ? " < > |
-        cleaned = re.sub(r'[\\/:*?"<>|]', '_', name)
-        # 공백은 언더바로 대체 (선택사항, 하지만 더 깔끔함)
-        cleaned = cleaned.replace(" ", "_").strip()
-        # 점으로 시작하거나 끝나는 경우 등 추가 정제
-        return cleaned[:150] # 길이 제한 (안전하게 150자)
+        from app.core.utils import clean_filename
+        return clean_filename(name, max_length=150)

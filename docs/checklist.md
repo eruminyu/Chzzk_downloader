@@ -156,22 +156,119 @@
 
 ---
 
+## 2026-02-19: Phase 7 — 채팅 아카이빙 로그 뷰어
+
+### 구현 내용
+- [x] `docs/phase7-chat-viewer.md` 설계 문서 작성
+- [x] `backend/app/api/chat.py` 신규 생성
+  - GET /api/chat/files — download_dir 하위 .jsonl 파일 목록 (base64url file_id, 채널별, message_count)
+  - GET /api/chat/files/{file_id}/messages — 메시지 조회 (page, limit, search, nickname 필터)
+  - GET /api/chat/files/{file_id}/download — FileResponse 직접 다운로드
+  - 경로 탈출 공격 방지 (is_relative_to 검증)
+- [x] `backend/app/main.py`: chat_router import + include_router 등록
+- [x] `frontend/src/api/client.ts`: ChatLogFile, ChatMessageItem, MessagesResponse 타입 + getChatFiles, getChatMessages, getChatDownloadUrl API 함수 추가
+- [x] `frontend/src/components/layout/Sidebar.tsx`: Chat Logs 메뉴 추가 (MessageSquare 아이콘)
+- [x] `frontend/src/App.tsx`: /chat Route + ChatLogs import 추가
+- [x] `frontend/src/pages/ChatLogs.tsx` 신규 생성
+  - FileListView: 채널별 그룹화, 파일명/날짜/메시지수/크기 표시, 다운로드 버튼 (stopPropagation)
+  - MessageViewer: 뒤로가기, 키워드/닉네임 검색 (Enter 또는 버튼), 페이지네이션, user_role 배지
+- [x] TypeScript 빌드 검증 통과
+
+---
+
 ## 남은 작업 (TODO)
 
 ### Phase 6: 테스트 및 검증
 - [ ] 라이브 녹화 중단 후 재생 가능 여부 실전 테스트
 - [ ] VOD 다운로드 (외부 URL) yt-dlp 정상 동작 확인
-- [ ] API 통합 테스트 FastAPI lifespan 이슈 해결 (httpx.AsyncClient 전환)
+- [ ] ~~API 통합 테스트 FastAPI lifespan 이슈 해결~~ (건너뜀 — 유닛 테스트로 충분히 커버됨)
 
 ### Phase 7: 채팅 아카이빙
-- [ ] 치지직 채팅 WebSocket 연결 구현
-- [ ] 실시간 채팅 로그 저장 (JSON Lines 형식)
-- [ ] 녹화 영상-채팅 로그 연동 (타임스탬프)
-- [ ] 채팅 로그 뷰어 UI 구현
+- [x] 치지직 채팅 WebSocket 연결 구현 (chat.py ChatArchiver)
+- [x] 실시간 채팅 로그 저장 (JSON Lines 형식)
+- [x] 녹화 영상-채팅 로그 연동 (타임스탬프, 동일 경로 .jsonl)
+- [x] 채팅 로그 뷰어 UI 구현
+- [x] **버그 수정**: conductor.py chat_archiver `output_file` → `output_path` 키 오타 수정
 
-### Phase 8: 추가 기능
-- [ ] 다중 화질 동시 녹화 지원
-- [ ] 스케줄 녹화 (특정 시간대만 녹화)
-- [ ] VOD 다운로드 대기열 우선순위 조정
-- [ ] 통계 대시보드 (총 녹화 시간, 용량, 채널별 통계)
-- [ ] 썸네일 자동 생성 (FFmpeg 기반)
+## 2026-02-19: 분할 저장 경로 + 폴더 찾아보기
+
+### 구현 내용
+- [x] `backend/app/core/config.py`: `split_download_dirs`, `vod_chzzk_dir`, `vod_external_dir` 3개 신규 설정
+- [x] `backend/app/engine/vod.py`: `download()` 메서드 경로 분기 로직
+  - 분할 비활성화 → `download_dir` / 치지직 URL → `vod_chzzk_dir` / 외부 URL → `vod_external_dir` (미설정 시 `download_dir` 폴백)
+- [x] `backend/app/api/settings.py`
+  - `GeneralSettingsUpdateRequest` 스키마 신규 필드 3개 추가
+  - `update_general_settings()` 핸들러 + .env 영구 저장
+  - `get_current_settings()` 응답에 신규 필드 포함
+  - `GET /api/settings/browse-dirs` 신규 엔드포인트 (Windows 드라이브 루트 지원, 접근 불가 폴더 스킵)
+- [x] `frontend/src/api/client.ts`: `Settings`/`GeneralSettingsUpdate` 확장 + `DirEntry`, `BrowseDirsResponse` 타입 + `browseDirs` API 함수
+- [x] `frontend/src/pages/Settings.tsx` 전면 개편
+  - `DirBrowserModal`: 서버 파일시스템 탐색 모달 (드라이브 루트 → 폴더 진입 → 선택)
+  - `DirInput`: 텍스트 직접 입력 + 찾아보기 버튼 재사용 컴포넌트
+  - `ToggleSwitch`: 토글 재사용 컴포넌트 (기존 인라인 토글 교체)
+  - 일반 설정 카드: 분할 경로 토글 + 펼침/접힘 치지직/외부 서브 경로 UI
+- [x] TypeScript 빌드 검증 통과
+
+## 2026-02-19: Phase 8 — 통계 대시보드
+
+### 구현 내용
+- [x] `backend/app/engine/conductor.py`: 라이브 감지 날짜 set(`_live_detections`) + `_save_live_history()` + `get_live_history()` + `get_live_detections()` 추가
+  - 하루 1회 카운트 (set 자료구조로 중복 제거)
+  - 날짜 경계 처리: is_live 상태 매 루프에서 today 날짜 추가 → 00:00 넘겨도 자동 카운트
+  - 최근 30일 기준 필터링
+- [x] `backend/app/api/stats.py` 신규: `GET /api/stats` 엔드포인트
+  - live_history.json 채널별 집계 (녹화 횟수, 시간, 용량)
+  - vod_history.json 완료 항목 집계 (chzzk/external 분류)
+  - shutil.disk_usage() 저장소 사용률
+  - Conductor.get_live_detections() 최근 30일 감지 횟수
+- [x] `backend/app/main.py`: stats_router 등록
+- [x] `frontend/src/api/client.ts`: ChannelLiveStat, LiveSession, StatsResponse 타입 + getStats API
+- [x] `frontend/src/components/layout/Sidebar.tsx`: Statistics 메뉴 추가 (BarChart2 아이콘)
+- [x] `frontend/src/App.tsx`: /stats Route 추가
+- [x] `frontend/src/pages/Stats.tsx` 신규: 요약 카드 4개 + 채널별 통계 테이블 + 최근 10개 세션
+- [x] TypeScript 빌드 검증 통과
+- [x] `docs/plan-stats-dashboard.md`, `docs/done-stats-dashboard.md` 작성
+
+### Phase 8 항목 정리
+- [x] 통계 대시보드 (총 녹화 시간, 용량, 채널별 통계, 저장소 사용률, 라이브 감지 횟수)
+- [x] VOD 다운로드 대기열 우선순위 조정 → 드래그 앤 드롭으로 이미 구현 완료 확인
+- [삭제] 썸네일 자동 생성 → 실용성 낮음 (라이브/VOD 모두 이미 썸네일 URL 제공)
+- [삭제] 다중 화질 동시 녹화 / 스케줄 녹화 → 범위 과도, 향후 필요 시 재검토
+
+## 2026-02-23: 코드베이스 전체 점검 및 정리
+
+### 백엔드
+- [x] 구문/임포트 정리 6건 (중복 import, 미사용 import, 무의미한 코드)
+- [x] `bare except` → `except Exception` 수정 3건
+- [x] `core/utils.py` 신규: 채널ID 파싱, 파일명 정제, .env 갱신 공용 유틸 추출
+- [x] `stream.py` 채널ID 파싱 5중 중복 → `extract_channel_id()` 통합
+- [x] `pipeline.py` + `vod.py` `_clean_filename()` 중복 → `clean_filename()` 통합
+- [x] `settings.py` + `auth.py` .env 갱신 중복 → `update_env_file()` 통합
+- [x] `downloader.py` Streamlink 세션 초기화 3중 반복 → `_create_session()` 추출
+- [x] `main.py` Windows 이벤트 루프 정책 중복 제거
+- [x] `downloader.py` 미호출 `get_stream_url()` 삭제
+- [x] `recorder.py` 미호출 `get_vod_status()` 삭제
+
+### 프론트엔드
+- [x] 죽은 코드 5개 파일 삭제 (~600줄): `types.ts`, `api.ts`, `Sidebar.tsx`, `LiveMonitor.tsx`, `VODDownloader.tsx`
+- [x] `client.ts` 레거시 `getVodStatus` + `VodStatus` 타입 삭제
+- [x] 미사용 npm 패키지 제거: `recharts`, `tailwind-merge`
+- [x] `utils/format.ts` 신규: `formatDuration`, `formatBytes`, `formatDate`, `formatTime` 공용화
+- [x] `utils/error.ts` 신규: `getErrorMessage()` — `catch (e: any)` 10곳 → `catch (e: unknown)` 타입 안전성 확보
+- [x] `VodContext.tsx` 상태 갱신 중복 제거 (`applyStatus` 추출)
+- [x] `Settings.tsx` `Select` 컴포넌트를 렌더 함수 외부로 추출
+- [x] TypeScript 컴파일 + 프로덕션 빌드 검증 통과
+
+---
+
+## 2026-02-19: Phase 9 — 배포 및 릴리즈 (계획)
+
+### 목표
+- Docker, Windows Desktop, Linux Native 환경 지원
+- 프론트엔드 정적 파일 백엔드 통합 (Monolith)
+
+### 작업 항목
+- [ ] **통합 구조**: `main.py` 정적 파일 서빙, `vite.config.ts` 빌드 경로 조정
+- [ ] **Docker**: Multi-stage `Dockerfile`, `docker-compose.yml` 작성
+- [ ] **Windows**: PyInstaller 패키징, 브라우저 자동 실행, 트레이 아이콘 고려
+- [ ] **Linux**: `install.sh`, `systemd` 서비스 등록 스크립트

@@ -1,5 +1,6 @@
-import { createContext, useContext, useState, useEffect, ReactNode } from "react";
+import { createContext, useContext, useState, useEffect, ReactNode, useCallback } from "react";
 import { api, VodTask } from "../api/client";
+import { getErrorMessage } from "../utils/error";
 
 export interface VodContextType {
     tasks: VodTask[];
@@ -24,32 +25,31 @@ export function VodProvider({ children }: { children: ReactNode }) {
     const [queuedCount, setQueuedCount] = useState(0);
     const [totalCount, setTotalCount] = useState(0);
 
+    const applyStatus = useCallback((data: { tasks: VodTask[]; active_count: number; queued_count: number; total_count: number }) => {
+        setTasks(data.tasks);
+        setActiveCount(data.active_count);
+        setQueuedCount(data.queued_count);
+        setTotalCount(data.total_count);
+    }, []);
+
+    const refreshTasks = useCallback(async () => {
+        try {
+            const data = await api.getAllVodStatus();
+            applyStatus(data);
+        } catch (e) {
+            console.error("VOD 상태 갱신 실패:", e);
+        }
+    }, [applyStatus]);
+
     // 전역 폴링 (컴포넌트 언마운트와 무관하게 지속)
     useEffect(() => {
-        const fetchStatus = async () => {
-            try {
-                const data = await api.getAllVodStatus();
-                setTasks(data.tasks);
-                setActiveCount(data.active_count);
-                setQueuedCount(data.queued_count);
-                setTotalCount(data.total_count);
-            } catch (e) {
-                console.error("VOD 상태 조회 실패:", e);
-            }
-        };
-
-        // 초기 로드
-        fetchStatus();
-
-        // 2초마다 폴링
-        const interval = setInterval(fetchStatus, 2000);
-
+        refreshTasks();
+        const interval = setInterval(refreshTasks, 2000);
         return () => clearInterval(interval);
-    }, []);
+    }, [refreshTasks]);
 
     const addTask = async (url: string, quality = "best") => {
         const { task_id } = await api.downloadVod(url, quality);
-        // 즉시 상태 갱신
         await refreshTasks();
         return task_id;
     };
@@ -75,18 +75,6 @@ export function VodProvider({ children }: { children: ReactNode }) {
         return new_task_id;
     };
 
-    const refreshTasks = async () => {
-        try {
-            const data = await api.getAllVodStatus();
-            setTasks(data.tasks);
-            setActiveCount(data.active_count);
-            setQueuedCount(data.queued_count);
-            setTotalCount(data.total_count);
-        } catch (e) {
-            console.error("VOD 상태 갱신 실패:", e);
-        }
-    };
-
     const clearCompleted = async () => {
         await api.clearCompletedVodTasks();
         await refreshTasks();
@@ -95,8 +83,8 @@ export function VodProvider({ children }: { children: ReactNode }) {
     const openFileLocation = async (taskId: string) => {
         try {
             await api.openVodFileLocation(taskId);
-        } catch (e: any) {
-            alert(e.response?.data?.detail || "파일 위치를 열 수 없습니다.");
+        } catch (e: unknown) {
+            alert(getErrorMessage(e, "파일 위치를 열 수 없습니다."));
         }
     };
 

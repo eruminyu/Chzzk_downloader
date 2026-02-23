@@ -27,5 +27,5 @@ else {
 }
 
 Write-Host "✨ 모든 서버가 새 창에서 실행되었습니다." -ForegroundColor Cyan
-Write-Host "👉 Frontend: http://localhost:5173" -ForegroundColor Yellow
+Write-Host "👉 Frontend: http://localhost:3000" -ForegroundColor Yellow
 Write-Host "👉 Backend: http://localhost:8000/docs" -ForegroundColor Yellow

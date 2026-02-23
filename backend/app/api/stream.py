@@ -8,6 +8,8 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from app.core.utils import extract_channel_id
+
 router = APIRouter(prefix="/api/stream", tags=["Stream"])
 
 
@@ -29,17 +31,7 @@ async def add_channel(req: AddChannelRequest):
 
     service = get_recorder_service()
 
-    # URL에서 채널 ID 추출 (다양한 형식 지원)
-    # 1. https://chzzk.naver.com/live/CHANNEL_ID
-    # 2. https://chzzk.naver.com/CHANNEL_ID
-    # 3. CHANNEL_ID (순수 ID)
-    channel_id = req.channel_id.strip()
-    if "chzzk.naver.com/" in channel_id:
-        # URL에서 마지막 경로 세그먼트 추출
-        channel_id = channel_id.rstrip("/").split("/")[-1]
-        # 쿼리 파라미터 제거
-        channel_id = channel_id.split("?")[0]
-
+    channel_id = extract_channel_id(req.channel_id)
     return service.add_channel(channel_id, req.auto_record)
 
 
@@ -50,10 +42,7 @@ async def remove_channel(channel_id: str):
 
     service = get_recorder_service()
 
-    # URL 형식으로 들어온 경우 채널 ID 추출
-    if "chzzk.naver.com/" in channel_id:
-        channel_id = channel_id.rstrip("/").split("/")[-1].split("?")[0]
-
+    channel_id = extract_channel_id(channel_id)
     return await service.remove_channel(channel_id)
 
 
@@ -73,9 +62,7 @@ async def toggle_auto_record(channel_id: str):
 
     service = get_recorder_service()
 
-    # URL 형식으로 들어온 경우 채널 ID 추출
-    if "chzzk.naver.com/" in channel_id:
-        channel_id = channel_id.rstrip("/").split("/")[-1].split("?")[0]
+    channel_id = extract_channel_id(channel_id)
 
     try:
         return service.toggle_auto_record(channel_id)
@@ -92,9 +79,7 @@ async def start_recording(channel_id: str):
 
     service = get_recorder_service()
 
-    # URL 형식으로 들어온 경우 채널 ID 추출
-    if "chzzk.naver.com/" in channel_id:
-        channel_id = channel_id.rstrip("/").split("/")[-1].split("?")[0]
+    channel_id = extract_channel_id(channel_id)
 
     try:
         return await service.start_recording(channel_id)
@@ -109,9 +94,7 @@ async def stop_recording(channel_id: str):
 
     service = get_recorder_service()
 
-    # URL 형식으로 들어온 경우 채널 ID 추출
-    if "chzzk.naver.com/" in channel_id:
-        channel_id = channel_id.rstrip("/").split("/")[-1].split("?")[0]
+    channel_id = extract_channel_id(channel_id)
 
     try:
         return await service.stop_recording(channel_id)

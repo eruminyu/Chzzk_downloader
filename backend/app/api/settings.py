@@ -8,10 +8,15 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+import os
+import platform
+import string
+
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.core.config import get_settings
+from app.core.utils import update_env_file as _update_env_file
 
 router = APIRouter(prefix="/api/settings", tags=["Settings"])
 
@@ -39,6 +44,9 @@ class GeneralSettingsUpdateRequest(BaseModel):
     monitor_interval: Optional[int] = Field(None, ge=5, le=300, description="감시 주기 (초)")
     output_format: Optional[str] = Field(None, description="녹화 출력 포맷 (ts, mp4, mkv)")
     recording_quality: Optional[str] = Field(None, description="녹화 품질 (best, 1080p, 720p, 480p)")
+    split_download_dirs: Optional[bool] = Field(None, description="분할 저장 경로 사용 여부")
+    vod_chzzk_dir: Optional[str] = Field(None, description="치지직 VOD/클립 저장 경로 (빈 문자열=기본 경로 사용)")
+    vod_external_dir: Optional[str] = Field(None, description="외부 URL 저장 경로 (빈 문자열=기본 경로 사용)")
 
 
 class VodSettingsUpdateRequest(BaseModel):
@@ -60,40 +68,6 @@ class DiscordSettingsUpdateRequest(BaseModel):
 
     discord_bot_token: Optional[str] = Field(None, description="Discord Bot 토큰")
     discord_notification_channel_id: Optional[str] = Field(None, description="알림을 보낼 Discord 채널 ID")
-
-
-# ── .env 파일 헬퍼 ──────────────────────────────────────
-
-def _update_env_file(updates: dict[str, str]) -> None:
-    """updates 딕셔너리의 키-값을 .env 파일에 반영한다.
-
-    기존 키는 덮어쓰고, 없는 키는 끝에 추가한다.
-    """
-    env_path = Path(".env")
-    lines: list[str] = []
-    if env_path.exists():
-        lines = env_path.read_text(encoding="utf-8").splitlines()
-
-    remaining = dict(updates)  # 아직 갱신되지 않은 키
-    new_lines: list[str] = []
-
-    for line in lines:
-        if line.strip().startswith("#") or "=" not in line:
-            new_lines.append(line)
-            continue
-
-        key = line.split("=", 1)[0].strip().upper()
-
-        if key in remaining:
-            new_lines.append(f"{key}={remaining.pop(key)}")
-        else:
-            new_lines.append(line)
-
-    # 파일에 없던 새 키 추가
-    for key, val in remaining.items():
-        new_lines.append(f"{key}={val}")
-
-    env_path.write_text("\n".join(new_lines), encoding="utf-8")
 
 
 # ── 엔드포인트 ───────────────────────────────────────────
@@ -127,6 +101,10 @@ async def get_current_settings():
         "chat_archive_enabled": settings.chat_archive_enabled,
         # Discord 설정
         "discord_notification_channel_id": settings.discord_notification_channel_id,
+        # 분할 저장 경로
+        "split_download_dirs": settings.split_download_dirs,
+        "vod_chzzk_dir": settings.vod_chzzk_dir,
+        "vod_external_dir": settings.vod_external_dir,
     }
 
 
@@ -200,6 +178,37 @@ async def update_general_settings(req: GeneralSettingsUpdateRequest):
         settings.recording_quality = quality
         env_updates["RECORDING_QUALITY"] = quality
 
+    # ── split_download_dirs ──
+    if req.split_download_dirs is not None:
+        settings.split_download_dirs = req.split_download_dirs
+        env_updates["SPLIT_DOWNLOAD_DIRS"] = str(req.split_download_dirs).lower()
+
+    # ── vod_chzzk_dir ──
+    if req.vod_chzzk_dir is not None:
+        if req.vod_chzzk_dir:
+            try:
+                Path(req.vod_chzzk_dir).mkdir(parents=True, exist_ok=True)
+            except OSError as e:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"치지직 VOD 저장 경로를 생성할 수 없습니다: {e}",
+                )
+        settings.vod_chzzk_dir = req.vod_chzzk_dir
+        env_updates["VOD_CHZZK_DIR"] = req.vod_chzzk_dir
+
+    # ── vod_external_dir ──
+    if req.vod_external_dir is not None:
+        if req.vod_external_dir:
+            try:
+                Path(req.vod_external_dir).mkdir(parents=True, exist_ok=True)
+            except OSError as e:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"외부 다운로드 저장 경로를 생성할 수 없습니다: {e}",
+                )
+        settings.vod_external_dir = req.vod_external_dir
+        env_updates["VOD_EXTERNAL_DIR"] = req.vod_external_dir
+
     # .env 영구 저장
     if env_updates:
         try:
@@ -214,6 +223,9 @@ async def update_general_settings(req: GeneralSettingsUpdateRequest):
             "monitor_interval": settings.monitor_interval,
             "output_format": settings.output_format,
             "recording_quality": settings.recording_quality,
+            "split_download_dirs": settings.split_download_dirs,
+            "vod_chzzk_dir": settings.vod_chzzk_dir,
+            "vod_external_dir": settings.vod_external_dir,
         },
     }
 
@@ -367,6 +379,69 @@ async def update_discord_settings(req: DiscordSettingsUpdateRequest):
             "discord_bot_configured": bool(settings.discord_bot_token),
             "discord_notification_channel_id": settings.discord_notification_channel_id,
         },
+    }
+
+
+@router.get("/browse-dirs", summary="디렉토리 탐색")
+async def browse_dirs(
+    path: str = Query("", description="탐색할 디렉토리 경로. 비어있으면 드라이브 루트 목록 반환"),
+):
+    """서버 파일시스템의 디렉토리 목록을 반환합니다.
+
+    - path가 비어있으면: Windows 드라이브 루트 목록 반환 (C:\\, D:\\ 등)
+    - path가 주어지면: 해당 경로의 하위 폴더 목록 반환
+    """
+    if not path:
+        if platform.system() == "Windows":
+            drives = [
+                f"{c}:\\"
+                for c in string.ascii_uppercase
+                if os.path.exists(f"{c}:\\")
+            ]
+            return {
+                "current": "",
+                "parent": None,
+                "dirs": [{"name": d, "path": d} for d in drives],
+            }
+        else:
+            root = Path("/")
+            dirs = []
+            for entry in sorted(root.iterdir()):
+                if not entry.is_dir():
+                    continue
+                try:
+                    list(entry.iterdir())
+                    dirs.append({"name": entry.name, "path": str(entry)})
+                except PermissionError:
+                    continue
+            return {"current": "/", "parent": None, "dirs": dirs}
+
+    target = Path(path)
+    if not target.exists() or not target.is_dir():
+        raise HTTPException(status_code=404, detail=f"디렉토리를 찾을 수 없습니다: {path}")
+
+    # 상위 경로 계산 (드라이브 루트는 parent가 자기 자신 → None 처리)
+    parent_str = str(target.parent)
+    parent_path = None if parent_str == path else parent_str
+
+    # 하위 폴더 목록 (접근 불가 폴더 스킵)
+    sub_dirs = []
+    try:
+        for entry in sorted(target.iterdir()):
+            if not entry.is_dir():
+                continue
+            try:
+                list(entry.iterdir())
+            except PermissionError:
+                continue
+            sub_dirs.append({"name": entry.name, "path": str(entry)})
+    except PermissionError:
+        pass
+
+    return {
+        "current": str(target),
+        "parent": parent_path,
+        "dirs": sub_dirs,
     }
 
 
