@@ -76,7 +76,8 @@ VALID_FORMATS = {"ts", "mp4", "mkv"}
 VALID_QUALITIES = {"best", "1080p", "720p", "480p"}
 
 
-@router.get("/", summary="현재 설정 조회")
+@router.get("", summary="현재 설정 조회")
+@router.get("/", include_in_schema=False)
 async def get_current_settings():
     """현재 애플리케이션 설정을 조회합니다 (민감정보 마스킹)."""
     settings = get_settings()

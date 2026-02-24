@@ -16,7 +16,8 @@ from app.core.config import get_settings
 router = APIRouter(prefix="/api/stats", tags=["Stats"])
 
 
-@router.get("/", summary="통계 대시보드 데이터 조회")
+@router.get("", summary="통계 대시보드 데이터 조회")
+@router.get("/", include_in_schema=False)
 async def get_stats():
     """라이브 녹화 이력, VOD 다운로드 이력, 저장소 사용량을 집계하여 반환합니다."""
     from app.main import get_recorder_service

@@ -3,6 +3,7 @@ import {
     FolderOpen, Shield, CheckCircle2,
     ChevronRight, ChevronLeft, Loader2, Eye, EyeOff,
 } from "lucide-react";
+import { DirInput } from "./ui/DirInput";
 
 // ── Types ─────────────────────────────────────────────
 
@@ -49,10 +50,10 @@ function StepIndicator({ current, total }: { current: Step; total: number }) {
                 <div key={n} className="flex items-center gap-2">
                     <div
                         className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold transition-all duration-300 ${n < current
-                                ? "bg-[#00FFA3] text-black"
-                                : n === current
-                                    ? "bg-[#00FFA3]/20 border-2 border-[#00FFA3] text-[#00FFA3]"
-                                    : "bg-zinc-800 border border-zinc-700 text-zinc-500"
+                            ? "bg-[#00FFA3] text-black"
+                            : n === current
+                                ? "bg-[#00FFA3]/20 border-2 border-[#00FFA3] text-[#00FFA3]"
+                                : "bg-zinc-800 border border-zinc-700 text-zinc-500"
                             }`}
                     >
                         {n < current ? <CheckCircle2 className="w-4 h-4" /> : n}
@@ -83,12 +84,10 @@ function Step1({ data, onChange }: { data: FormData; onChange: (k: keyof FormDat
                     <FolderOpen className="inline w-4 h-4 mr-1 text-[#00FFA3]" />
                     녹화 저장 경로 <span className="text-red-400">*</span>
                 </label>
-                <input
-                    type="text"
+                <DirInput
                     value={data.download_dir}
-                    onChange={(e) => onChange("download_dir", e.target.value)}
+                    onChange={(val) => onChange("download_dir", val)}
                     placeholder="예: C:\Recordings 또는 /home/user/recordings"
-                    className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-2.5 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-[#00FFA3] transition-colors"
                 />
                 <p className="text-xs text-zinc-500 mt-1.5">경로가 없으면 자동으로 생성됩니다.</p>
             </div>
@@ -103,8 +102,8 @@ function Step1({ data, onChange }: { data: FormData; onChange: (k: keyof FormDat
                             type="button"
                             onClick={() => onChange("recording_quality", q)}
                             className={`py-2 rounded-lg text-sm font-medium border transition-all ${data.recording_quality === q
-                                    ? "bg-[#00FFA3]/10 border-[#00FFA3] text-[#00FFA3]"
-                                    : "bg-zinc-800 border-zinc-700 text-zinc-400 hover:border-zinc-500"
+                                ? "bg-[#00FFA3]/10 border-[#00FFA3] text-[#00FFA3]"
+                                : "bg-zinc-800 border-zinc-700 text-zinc-400 hover:border-zinc-500"
                                 }`}
                         >
                             {q}
@@ -123,8 +122,8 @@ function Step1({ data, onChange }: { data: FormData; onChange: (k: keyof FormDat
                             type="button"
                             onClick={() => onChange("output_format", f)}
                             className={`py-2 rounded-lg text-sm font-medium border transition-all ${data.output_format === f
-                                    ? "bg-[#00FFA3]/10 border-[#00FFA3] text-[#00FFA3]"
-                                    : "bg-zinc-800 border-zinc-700 text-zinc-400 hover:border-zinc-500"
+                                ? "bg-[#00FFA3]/10 border-[#00FFA3] text-[#00FFA3]"
+                                : "bg-zinc-800 border-zinc-700 text-zinc-400 hover:border-zinc-500"
                                 }`}
                         >
                             .{f.toUpperCase()}

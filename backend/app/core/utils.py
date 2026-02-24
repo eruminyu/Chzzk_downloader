@@ -48,9 +48,13 @@ def update_env_file(updates: dict[str, str]) -> None:
     """
     env_path = Path(".env")
     if not env_path.exists():
-        env_path = Path("backend/.env")
-        if not env_path.exists():
-            return
+        # backend/.env가 존재하는지 먼저 확인
+        alt_env = Path("backend/.env")
+        if alt_env.exists():
+            env_path = alt_env
+        else:
+            # 둘 다 없으면 기본 위치에 새로 생성
+            env_path.touch(exist_ok=True)
 
     try:
         lines = env_path.read_text(encoding="utf-8").splitlines()
@@ -73,6 +77,6 @@ def update_env_file(updates: dict[str, str]) -> None:
         for key, val in remaining.items():
             new_lines.append(f"{key}={val}")
 
-        env_path.write_text("\n".join(new_lines), encoding="utf-8")
+        env_path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
     except Exception as e:
         logger.error(f".env 파일 업데이트 실패: {e}")
