@@ -33,13 +33,6 @@ dist/
 build/
 *.spec
 
-# 프론트엔드 빌드 결과 (backend에 복사되는 static)
-backend/app/static/
-
-# 생성된 아이콘
-assets/icon.png
-assets/icon.ico
-
 # Runtime data & logs
 backend/data/
 backend/logs/
@@ -51,7 +44,7 @@ logs/
 .DS_Store
 Thumbs.db
 
-# Recordings & test recordings
+# Recordings & test recordings (용량이 매우 크므로 반드시 제외!)
 recordings/
 backend/recordings/
 backend/test_recordings/
@@ -59,10 +52,17 @@ backend/test_recordings/
 *.mp4
 *.mkv
 
-# Exceptions: Do not ignore TypeScript files in frontend
-!frontend/**/*.ts
-!frontend/*.ts
+# Git
+.git/
+.gitignore
+
+# Docs (빌드에 불필요)
+docs/
 
 # Test cache
 .pytest_cache/
 backend/.pytest_cache/
+
+# Exceptions: frontend TypeScript 파일은 포함
+!frontend/**/*.ts
+!frontend/*.ts

@@ -61,12 +61,22 @@ export function DirBrowserModal({ initialPath, onSelect, onClose }: DirBrowserMo
                         <Folder className="w-4 h-4 text-[#00FFA3]" />
                         폴더 선택
                     </h3>
-                    <button
-                        onClick={onClose}
-                        className="p-1 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
-                    >
-                        <X className="w-4 h-4" />
-                    </button>
+                    <div className="flex items-center gap-1">
+                        {/* 드라이브 리스트로 이동 버튼 */}
+                        <button
+                            onClick={() => navigate(undefined)}
+                            title="드라이브 목록으로"
+                            className="p-1.5 rounded-lg text-zinc-400 hover:text-[#00FFA3] hover:bg-zinc-800 transition-colors"
+                        >
+                            <HardDrive className="w-4 h-4" />
+                        </button>
+                        <button
+                            onClick={onClose}
+                            className="p-1 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
+                        >
+                            <X className="w-4 h-4" />
+                        </button>
+                    </div>
                 </div>
 
                 {/* Current Path */}

@@ -12,6 +12,7 @@ PyInstaller로 빌드된 .exe 실행 시:
 from __future__ import annotations
 
 import asyncio
+import os
 import shutil
 import subprocess
 import sys
@@ -19,6 +20,22 @@ import threading
 import time
 import webbrowser
 from pathlib import Path
+
+
+# ── PyInstaller SSL 인증서 번들 설정 ────────────────────────────
+# PyInstaller 빌드 시 certifi CA 번들이 자동으로 포함되지 않아
+# aiohttp/yt-dlp 등에서 SSL 인증서 검증 실패가 발생한다.
+# 앱 시작 전에 SSL_CERT_FILE 환경변수를 설정하여 해결.
+def _setup_ssl_certs() -> None:
+    """PyInstaller 환경에서 SSL 인증서 경로를 설정한다."""
+    if getattr(sys, "frozen", False):
+        try:
+            import certifi
+            os.environ["SSL_CERT_FILE"] = certifi.where()
+        except ImportError:
+            pass
+
+_setup_ssl_certs()
 
 
 # ── PyInstaller 빌드 판별 ────────────────────────────────────

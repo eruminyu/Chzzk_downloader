@@ -7,18 +7,21 @@ services:
     restart: unless-stopped
     ports:
       - "${PORT:-8000}:8000"
-    env_file:
-      - .env
     environment:
-      # Docker 환경에서는 ffmpeg/streamlink가 시스템에 설치되어 있으므로 PATH만 지정
+      # Docker 환경에서는 ffmpeg/streamlink가 시스템에 설치됨
       - FFMPEG_PATH=ffmpeg
     volumes:
+      # .env: 초기설정 마법사 완료 시 생성, 재시작해도 설정 유지
+      # (호스트에 .env가 없으면 Docker가 빈 디렉토리를 만드는데, entrypoint에서 정리함)
+      - ./.env:/app/.env
       # 영속성이 필요한 데이터 마운트
-      - ./recordings:/app/recordings   # 녹화 파일
-      - ./data:/app/data               # channels.json 등 설정 파일
-      - ./logs:/app/logs               # 애플리케이션 로그
+      - ./recordings:/app/recordings # 녹화 파일
+      - ./data:/app/data # channels.json 등 설정 파일
+      - ./logs:/app/logs # 애플리케이션 로그
+    # 디렉토리로 잘못 마운트된 경우 빈 파일로 교체 후 서버 시작
+    entrypoint: [ "/bin/sh", "-c", "[ -d /app/.env ] && rm -rf /app/.env && touch /app/.env; python -m uvicorn app.main:app --host 0.0.0.0 --port 8000" ]
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
       interval: 30s
       timeout: 10s
       retries: 3

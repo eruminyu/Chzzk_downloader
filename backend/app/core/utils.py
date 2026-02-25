@@ -6,9 +6,37 @@ Chzzk-Recorder-Pro: 공통 유틸리티
 from __future__ import annotations
 
 import re
+import sys
 from pathlib import Path
 
 from app.core.logger import logger
+
+
+def _get_env_path() -> Path:
+    """실행 환경에 맞는 .env 파일의 절대 경로를 반환한다.
+
+    탐색 순서:
+        1. PyInstaller exe 빌드: exe 파일 옆
+        2. Docker 컨테이너: /app/.env (볼륨 마운트 경로)
+        3. 개발 환경: 프로젝트 루트
+    """
+    if getattr(sys, "frozen", False):
+        # 1) 빌드된 exe 기준: exe 파일이 있는 폴더
+        return Path(sys.executable).parent / ".env"
+
+    if Path("/.dockerenv").exists():
+        # 2) Docker 컨테이너 환경: /app/.env (docker-compose 볼륨 마운트 경로)
+        return Path("/app/.env")
+
+    # 3) 개발 환경: 프로젝트 루트 탐색
+    project_root = Path(__file__).resolve().parents[3]
+    candidate = project_root / ".env"
+    if candidate.exists():
+        return candidate
+    backend_env = project_root / "backend" / ".env"
+    if backend_env.exists():
+        return backend_env
+    return candidate  # 없으면 프로젝트 루트에 생성
 
 
 def extract_channel_id(channel_id: str) -> str:
@@ -46,15 +74,10 @@ def update_env_file(updates: dict[str, str]) -> None:
 
     기존 키는 덮어쓰고, 없는 키는 끝에 추가한다.
     """
-    env_path = Path(".env")
+    env_path = _get_env_path()
     if not env_path.exists():
-        # backend/.env가 존재하는지 먼저 확인
-        alt_env = Path("backend/.env")
-        if alt_env.exists():
-            env_path = alt_env
-        else:
-            # 둘 다 없으면 기본 위치에 새로 생성
-            env_path.touch(exist_ok=True)
+        env_path.parent.mkdir(parents=True, exist_ok=True)
+        env_path.touch(exist_ok=True)
 
     try:
         lines = env_path.read_text(encoding="utf-8").splitlines()

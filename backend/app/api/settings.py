@@ -417,13 +417,17 @@ async def browse_dirs(
                     continue
             return {"current": "/", "parent": None, "dirs": dirs}
 
-    target = Path(path)
+    target = Path(path).resolve()
     if not target.exists() or not target.is_dir():
         raise HTTPException(status_code=404, detail=f"디렉토리를 찾을 수 없습니다: {path}")
 
-    # 상위 경로 계산 (드라이브 루트는 parent가 자기 자신 → None 처리)
-    parent_str = str(target.parent)
-    parent_path = None if parent_str == path else parent_str
+    # 상위 경로 계산:
+    # Windows 드라이브 루트(C:\): parent가 자기 자신 → None 처리
+    if target.parent == target:
+        # 이미 드라이브 루트
+        parent_path = None
+    else:
+        parent_path = str(target.parent)
 
     # 하위 폴더 목록 (접근 불가 폴더 스킵)
     sub_dirs = []

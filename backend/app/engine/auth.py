@@ -93,10 +93,17 @@ class AuthManager:
         """런타임 및 파일에 쿠키를 갱신한다."""
         self._nid_aut = nid_aut
         self._nid_ses = nid_ses
-        
+
+        # Settings 싱글턴도 즉시 업데이트 (lru_cache 캐싱으로 재로딩 불가)
+        # 이를 통해 이후 AuthManager() 생성 시 올바른 쿠키를 가져올 수 있음
+        settings = get_settings()
+        settings.nid_aut = nid_aut
+        settings.nid_ses = nid_ses
+
         # .env 파일에 저장
         self._persist_env({"NID_AUT": nid_aut, "NID_SES": nid_ses})
         logger.info("인증 쿠키가 업데이트되고 .env 파일에 저장되었습니다.")
+
 
     def _persist_env(self, updates: dict[str, str]) -> None:
         """.env 파일의 특정 키 값을 업데이트한다."""

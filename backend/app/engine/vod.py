@@ -317,25 +317,31 @@ class VodEngine:
             task.started_at = datetime.now()
             logger.info(f"[{task_id}] 다운로드 시작: {task.url}")
 
-            # URL 타입 감지: 치지직 URL이면 Streamlink, 그 외는 yt-dlp
+            # URL 타입 감지
             is_chzzk = self._is_chzzk_url(task.url)
             is_clip = "/clips/" in task.url
 
             try:
                 if is_chzzk and is_clip:
-                    # 치지직 클립 (Streamlink + FFmpeg)
+                    # 치지직 클립 (Streamlink + FFmpeg, 짧은 영상)
                     await self._download_clip(task_id, task)
-                elif is_chzzk:
-                    # 치지직 VOD (Streamlink + FFmpeg)
-                    await self._download_vod(task_id, task)
                 else:
-                    # 유튜브 등 외부 URL (yt-dlp)
+                    # 치지직 VOD 및 모든 외부 URL → yt-dlp
+                    # ── 근본 수정: Streamlink DASHStream.read()가 EOF를 반환하지 않아
+                    # VOD 다운로드가 99%에서 멈추는 버그. yt-dlp는 EOF를 정확히 알고 있음.
                     await self._download_external(task_id, task)
 
             except DownloadCancelledError:
                 task.state = VodDownloadState.IDLE
                 task.progress = 0.0
                 logger.info(f"[{task_id}] 다운로드 취소됨: {task.url}")
+
+            except asyncio.CancelledError:
+                # 서버 종료(Ctrl+C) 등으로 태스크가 취소됨 → 재시도하지 않음
+                task.state = VodDownloadState.IDLE
+                task.progress = 0.0
+                logger.info(f"[{task_id}] 다운로드 태스크 취소됨 (서버 종료): {task.url}")
+                raise  # CancelledError는 반드시 재전파
 
             except Exception as e:
                 # FFmpeg 프로세스 실패 시 처리
@@ -345,6 +351,15 @@ class VodEngine:
                     logger.info(f"[{task_id}] 다운로드 취소됨 (예외 처리): {task.url}")
                 else:
                     import traceback
+
+                    # 이벤트 루프가 종료 중이면 재시도하지 않음
+                    loop = asyncio.get_event_loop()
+                    if not loop.is_running():
+                        logger.info(f"[{task_id}] 이벤트 루프 종료 중, 재시도 중단")
+                        task.state = VodDownloadState.ERROR
+                        task.error_message = str(e)
+                        return
+
                     task.retry_count += 1
 
                     # 재시도 가능 여부 확인
@@ -440,7 +455,11 @@ class VodEngine:
             filename=filename,
         )
 
-        # 3. 진행률 모니터링 (파일 크기 기반)
+        # 3. 진행률 모니터링 (파일 크기 기반 + 정체 감지)
+        last_size = 0
+        stall_count = 0
+        STALL_THRESHOLD = 15  # 15회 × 2초 = 30초 동안 파일 크기 변화 없으면 완료로 간주
+
         while pipeline.state.value == "recording":
             if task.cancel_flag:
                 await pipeline.stop_recording()
@@ -457,10 +476,27 @@ class VodEngine:
                 # 크기 정보가 없으므로 대략적으로 표시
                 task.progress = min((downloaded / (500 * 1024 * 1024)) * 100, 99.0)
 
+                # ── VOD 정체(Stall) 감지 ──
+                # Streamlink DASHStream이 모든 데이터 전송 후 EOF를 보내지 않아
+                # FFmpeg가 종료되지 않는 문제를 우회한다.
+                if downloaded > 0 and downloaded == last_size:
+                    stall_count += 1
+                    if stall_count >= STALL_THRESHOLD:
+                        logger.info(
+                            f"[{task_id}] VOD 스트림 데이터 수신 완료 감지 "
+                            f"(파일 크기 {downloaded / (1024*1024):.1f}MB, {stall_count * 2}초 정체). "
+                            f"파이프라인을 종료합니다."
+                        )
+                        await pipeline.stop_recording()
+                        break
+                else:
+                    stall_count = 0
+                    last_size = downloaded
+
             await asyncio.sleep(2)
 
-        # 4. 완료 확인
-        if pipeline.state.value == "completed" and output_file.exists():
+        # 4. 완료 확인 (stall 감지로 stop_recording된 경우도 파일이 있으면 완료 처리)
+        if output_file.exists() and pipeline.state.value in ("completed", "stopping"):
             task.state = VodDownloadState.COMPLETED
             task.completed_at = datetime.now()
             task.output_path = str(output_file)
@@ -505,6 +541,25 @@ class VodEngine:
 
             # Chzzk 플러그인 인스턴스 직접 생성
             plugin = Chzzk(session, task.url)
+
+            # ── Streamlink 8.2.0 chzzk 플러그인 버그 패치 ──
+            # _get_vod_playback()에서 metadata를 4개 언패킹하지만
+            # get_clips()는 3개만 반환하여 ValueError 발생.
+            # metadata가 부족하면 None으로 패딩하여 우회한다.
+            _original_get_vod_playback = plugin._get_vod_playback
+
+            def _patched_get_vod_playback(datatype, data):
+                if datatype == "error":
+                    return _original_get_vod_playback(datatype, data)
+                # data 튜플에서 앞 4개(adult, in_key, vod_id, playback)를 제외한 나머지가 metadata
+                if isinstance(data, tuple) and len(data) >= 4:
+                    metadata_len = len(data) - 4
+                    if metadata_len < 4:
+                        # metadata를 4개로 패딩 (id, author, title, category)
+                        data = data + (None,) * (4 - metadata_len)
+                return _original_get_vod_playback(datatype, data)
+
+            plugin._get_vod_playback = _patched_get_vod_playback
 
             # 플러그인의 streams() 메서드를 직접 호출
             streams = plugin.streams()
@@ -553,7 +608,11 @@ class VodEngine:
             filename=filename,
         )
 
-        # 진행률 모니터링 (파일 크기 기반)
+        # 진행률 모니터링 (파일 크기 기반 + 정체 감지)
+        last_size = 0
+        stall_count = 0
+        STALL_THRESHOLD = 10  # 10회 × 2초 = 20초 (클립은 짧으므로 더 짧은 감지)
+
         while pipeline.state.value == "recording":
             if task.cancel_flag:
                 await pipeline.stop_recording()
@@ -564,14 +623,29 @@ class VodEngine:
 
             # 파일 크기 기반 진행률 추정 (완전한 추정이 불가능하므로 대략적으로)
             if output_file.exists():
-                file_size_mb = output_file.stat().st_size / (1024 * 1024)
+                current_size = output_file.stat().st_size
+                file_size_mb = current_size / (1024 * 1024)
                 # 임의로 100MB를 100%로 가정 (클립은 보통 짧음)
                 task.progress = min((file_size_mb / 100) * 100, 99.0)
 
+                # ── 클립 정체(Stall) 감지 ──
+                if current_size > 0 and current_size == last_size:
+                    stall_count += 1
+                    if stall_count >= STALL_THRESHOLD:
+                        logger.info(
+                            f"[{task_id}] 클립 데이터 수신 완료 감지 "
+                            f"(파일 크기 {file_size_mb:.1f}MB). 파이프라인을 종료합니다."
+                        )
+                        await pipeline.stop_recording()
+                        break
+                else:
+                    stall_count = 0
+                    last_size = current_size
+
             await asyncio.sleep(2)
 
-        # 완료 확인
-        if pipeline.state.value == "completed" and output_file.exists():
+        # 완료 확인 (stall 감지로 stop_recording된 경우도 파일이 있으면 완료 처리)
+        if output_file.exists() and pipeline.state.value in ("completed", "stopping"):
             task.state = VodDownloadState.COMPLETED
             task.completed_at = datetime.now()
             task.output_path = str(output_file)

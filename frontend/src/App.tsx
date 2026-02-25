@@ -4,6 +4,7 @@ import { Layout } from "./components/layout/Layout";
 import { ToastProvider } from "./components/ui/Toast";
 import { ConfirmProvider } from "./components/ui/ConfirmModal";
 import { SetupWizard } from "./components/SetupWizard";
+import { ThemeProvider } from "./context/ThemeContext";
 import Dashboard from "./pages/Dashboard";
 import VodDownload from "./pages/VodDownload";
 import Settings from "./pages/Settings";
@@ -30,25 +31,27 @@ function App() {
     }
 
     return (
-        <ToastProvider>
-            <ConfirmProvider>
-                {/* 초기 설정 마법사: 완료 전까지 모든 화면 위에 표시 */}
-                {needsSetup && (
-                    <SetupWizard onComplete={() => setNeedsSetup(false)} />
-                )}
-                <BrowserRouter>
-                    <Routes>
-                        <Route path="/" element={<Layout />}>
-                            <Route index element={<Dashboard />} />
-                            <Route path="vod" element={<VodDownload />} />
-                            <Route path="chat" element={<ChatLogs />} />
-                            <Route path="stats" element={<Stats />} />
-                            <Route path="settings" element={<Settings />} />
-                        </Route>
-                    </Routes>
-                </BrowserRouter>
-            </ConfirmProvider>
-        </ToastProvider>
+        <ThemeProvider>
+            <ToastProvider>
+                <ConfirmProvider>
+                    {/* 초기 설정 마법사: 완료 전까지 모든 화면 위에 표시 */}
+                    {needsSetup && (
+                        <SetupWizard onComplete={() => setNeedsSetup(false)} />
+                    )}
+                    <BrowserRouter>
+                        <Routes>
+                            <Route path="/" element={<Layout />}>
+                                <Route index element={<Dashboard />} />
+                                <Route path="vod" element={<VodDownload />} />
+                                <Route path="chat" element={<ChatLogs />} />
+                                <Route path="stats" element={<Stats />} />
+                                <Route path="settings" element={<Settings />} />
+                            </Route>
+                        </Routes>
+                    </BrowserRouter>
+                </ConfirmProvider>
+            </ToastProvider>
+        </ThemeProvider>
     );
 }
 

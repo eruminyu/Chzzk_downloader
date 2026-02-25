@@ -42,6 +42,7 @@ class FFmpegPipeline:
         self._output_path: Optional[str] = None
         self._feeder_task: Optional[asyncio.Task] = None
         self._stream_fd = None
+        self._intentional_stop = False  # stop_recording() 호출 시 True → _watch_process가 에러 무시
 
         # 녹화 통계
         self._file_size_bytes: int = 0  # 현재 파일 크기 (바이트)
@@ -326,6 +327,7 @@ class FFmpegPipeline:
             logger.warning(f"[{self._channel_id}] 녹화 중이 아닙니다.")
             return
 
+        self._intentional_stop = True  # _watch_process에 에러 무시 신호
         self._state = RecordingState.STOPPING
         logger.info(f"[{self._channel_id}] FFmpeg 정상 종료 요청...")
 
@@ -407,6 +409,10 @@ class FFmpegPipeline:
             else:
                 self._state = RecordingState.COMPLETED
                 logger.info(f"[{self._channel_id}] FFmpeg 프로세스 정상 종료.")
+        elif self._state == RecordingState.STOPPING:
+            # stop_recording()이 호출된 후 FFmpeg가 종료된 경우
+            # (stop_recording()의 마지막에서 COMPLETED로 설정하므로 여기선 무시)
+            logger.debug(f"[{self._channel_id}] FFmpeg 종료 감지 (STOPPING 상태, 무시).")
 
     def get_status(self) -> dict:
         """현재 녹화 상태를 딕셔너리로 반환."""

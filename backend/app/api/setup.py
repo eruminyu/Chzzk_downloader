@@ -1,28 +1,37 @@
 """
 Chzzk-Recorder-Pro: 초기 설정 API
 최초 실행 감지 및 마법사 완료 처리를 담당한다.
+
+[설계 원칙]
+- .env 파일의 존재 여부만으로 초기 설정 완료를 판단한다.
+- 신규 사용자: exe 실행 → .env 없음 → 마법사 표시
+- 기존 사용자: exe + .env 함께 이동 → 기존 설정값 그대로 실행
+- 초기화 원할 때: .env 삭제 후 실행 → 마법사 다시 표시
 """
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
-from typing import Optional
 
 from app.core.config import get_settings
 from app.core.logger import logger
+from app.core.utils import _get_env_path, update_env_file as _update_env_file
 
 router = APIRouter(prefix="/api/setup", tags=["Setup"])
 
-# 초기 설정 완료 여부를 표시하는 플래그 파일
-# backend/ 기준 상위의 data/ 폴더에 위치
-_FLAG_FILE = Path(__file__).resolve().parents[3] / "data" / ".setup_complete"
-
 
 def is_setup_complete() -> bool:
-    """초기 설정이 완료되었는지 확인한다."""
-    return _FLAG_FILE.exists()
+    """.env 파일이 존재하고 필수 키(DOWNLOAD_DIR)가 설정돼 있으면 초기 설정 완료로 간주한다."""
+    env_path = _get_env_path()
+    if not env_path.exists():
+        return False
+    # 빈 파일이거나 DOWNLOAD_DIR가 없으면 미완성으로 판단
+    content = env_path.read_text(encoding="utf-8")
+    return any(line.startswith("DOWNLOAD_DIR=") and len(line.split("=", 1)) > 1 and line.split("=", 1)[1].strip()
+               for line in content.splitlines())
 
 
 # ── 요청 스키마 ──────────────────────────────────────────
@@ -51,11 +60,9 @@ async def get_setup_status():
 @router.post("/complete", summary="초기 설정 완료 처리")
 async def complete_setup(req: SetupCompleteRequest):
     """
-    마법사 완료 시 설정을 .env에 저장하고 플래그 파일을 생성한다.
+    마법사 완료 시 설정을 .env에 저장한다.
     이후 서버 재시작 없이 in-memory 설정도 즉시 반영한다.
     """
-    from app.api.settings import _update_env_file
-
     VALID_FORMATS = {"ts", "mp4", "mkv"}
     VALID_QUALITIES = {"best", "1080p", "720p", "480p"}
 
@@ -71,7 +78,7 @@ async def complete_setup(req: SetupCompleteRequest):
     save_dir = Path(req.download_dir)
     save_dir.mkdir(parents=True, exist_ok=True)
 
-    # .env 업데이트
+    # .env 파일에 설정 저장 (이 파일이 생성되면 곧 초기설정 완료를 의미)
     env_updates: dict[str, str] = {
         "DOWNLOAD_DIR": req.download_dir,
         "OUTPUT_FORMAT": fmt,
@@ -92,9 +99,5 @@ async def complete_setup(req: SetupCompleteRequest):
         settings.nid_aut = req.nid_aut
         settings.nid_ses = req.nid_ses
 
-    # 플래그 파일 생성 (data/ 폴더도 없으면 함께 생성)
-    _FLAG_FILE.parent.mkdir(parents=True, exist_ok=True)
-    _FLAG_FILE.touch()
-
-    logger.info("✅ 초기 설정 완료. 플래그 파일 생성됨.")
+    logger.info(f"✅ 초기 설정 완료. .env 생성됨: {_get_env_path()}")
     return {"success": True, "message": "초기 설정이 완료되었습니다."}

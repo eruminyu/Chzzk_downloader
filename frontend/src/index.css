@@ -1,5 +1,13 @@
 @import "tailwindcss";
 
+/* ── 기본 테마 변수 (치지직 그린) ─────────────────── */
+:root {
+  --primary: #00FFA3;
+  --primary-dark: #00D689;
+  --primary-dim: rgba(0, 255, 163, 0.15);
+  --primary-ring: rgba(0, 255, 163, 0.5);
+}
+
 /* ── Chzzk 커스텀 테마 ────────────────────────────── */
 @theme {
   --color-chzzk: #00FFA3;
@@ -9,6 +17,55 @@
   --color-chzzk-hover: #252830;
 }
 
+/* ── 테마 프리셋 ──────────────────────────────────── */
+/* JS: document.documentElement.style.setProperty('--primary', value) */
+/* 또는 data-theme 속성으로 일괄 적용 */
+[data-theme="green"] {
+  --primary: #00FFA3;
+  --primary-dark: #00D689;
+  --primary-dim: rgba(0, 255, 163, 0.15);
+  --primary-ring: rgba(0, 255, 163, 0.5);
+}
+
+[data-theme="blue"] {
+  --primary: #3B82F6;
+  --primary-dark: #2563EB;
+  --primary-dim: rgba(59, 130, 246, 0.15);
+  --primary-ring: rgba(59, 130, 246, 0.5);
+}
+
+[data-theme="purple"] {
+  --primary: #A855F7;
+  --primary-dark: #9333EA;
+  --primary-dim: rgba(168, 85, 247, 0.15);
+  --primary-ring: rgba(168, 85, 247, 0.5);
+}
+
+[data-theme="orange"] {
+  --primary: #F97316;
+  --primary-dark: #EA6C0A;
+  --primary-dim: rgba(249, 115, 22, 0.15);
+  --primary-ring: rgba(249, 115, 22, 0.5);
+}
+
+[data-theme="red"] {
+  --primary: #EF4444;
+  --primary-dark: #DC2626;
+  --primary-dim: rgba(239, 68, 68, 0.15);
+  --primary-ring: rgba(239, 68, 68, 0.5);
+}
+
+/* ── 네비게이션 활성 상태 (테마 색상 자동 적용) ──── */
+.nav-active {
+  background-color: var(--primary-dim);
+  color: var(--primary);
+}
+
+.nav-active:hover {
+  background-color: var(--primary-dim);
+}
+
+
 /* ── 기본 스타일 ──────────────────────────────────── */
 body {
   background-color: var(--color-chzzk-bg);
@@ -16,7 +73,8 @@ body {
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
 }
 
-code, .font-mono {
+code,
+.font-mono {
   font-family: 'JetBrains Mono', 'Consolas', monospace;
 }
 
@@ -47,13 +105,27 @@ code, .font-mono {
 
 /* ── 애니메이션 ───────────────────────────────────── */
 @keyframes fade-in {
-  from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 @keyframes slide-in-from-top {
-  from { opacity: 0; transform: translateY(-16px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(-16px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .animate-fade-in {
@@ -66,8 +138,15 @@ code, .font-mono {
 
 /* Toast slide-in from right */
 @keyframes slide-in-right {
-  from { opacity: 0; transform: translateX(100%); }
-  to { opacity: 1; transform: translateX(0); }
+  from {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
 }
 
 .animate-slide-in {
@@ -76,8 +155,13 @@ code, .font-mono {
 
 /* Modal backdrop fade */
 @keyframes backdrop-fade {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
 }
 
 .animate-backdrop {
@@ -86,8 +170,15 @@ code, .font-mono {
 
 /* Modal scale-in */
 @keyframes modal-in {
-  from { opacity: 0; transform: scale(0.95); }
-  to { opacity: 1; transform: scale(1); }
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 .animate-modal-in {
@@ -96,8 +187,13 @@ code, .font-mono {
 
 /* Sidebar slide-in from left */
 @keyframes slide-in-left {
-  from { transform: translateX(-100%); }
-  to { transform: translateX(0); }
+  from {
+    transform: translateX(-100%);
+  }
+
+  to {
+    transform: translateX(0);
+  }
 }
 
 .animate-slide-in-sidebar {

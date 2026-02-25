@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
     Settings as SettingsIcon,
     Shield,
@@ -14,7 +14,10 @@ import {
     MessageCircle,
     FolderOpen,
     Folder,
-    HardDrive,
+    Palette,
+    Type,
+    ImageIcon,
+    RotateCcw,
     ArrowLeft,
     ChevronRight,
     X,
@@ -23,6 +26,7 @@ import { api, Settings as SettingsType, BrowseDirsResponse, DirEntry } from "../
 import { useToast } from "../components/ui/Toast";
 import { getErrorMessage } from "../utils/error";
 import { DirInput } from "../components/ui/DirInput";
+import { useTheme, THEMES, ThemeId } from "../context/ThemeContext";
 
 // ── ToggleSwitch ─────────────────────────────────────────
 
@@ -98,6 +102,12 @@ export default function Settings() {
     const [discordBotToken, setDiscordBotToken] = useState("");
     const [discordChannelId, setDiscordChannelId] = useState("");
     const [discordSaving, setDiscordSaving] = useState(false);
+
+    // Appearance
+    const { themeId, customColor, pageTitle, setTheme, setCustomColor, setPageTitle, setIconUrl, resetAll } = useTheme();
+    const [titleInput, setTitleInput] = useState(pageTitle);
+    const iconInputRef = useRef<HTMLInputElement>(null);
+    const colorPickerRef = useRef<HTMLInputElement>(null);
 
     useEffect(() => {
         loadSettings();
@@ -765,6 +775,120 @@ export default function Settings() {
                                 </span>
                             </div>
                         </div>
+                    </div>
+
+                    <div className="bg-zinc-900/50 p-6 rounded-xl border border-zinc-800 space-y-5">
+                        <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                            <Palette className="w-5 h-5" style={{ color: 'var(--primary)' }} />
+                            외관 (Appearance)
+                        </h3>
+                        <div className="space-y-3">
+                            <label className="text-sm font-medium text-zinc-300 flex items-center gap-2">
+                                <Palette className="w-4 h-4" />
+                                컬러 테마
+                            </label>
+                            <div className="flex gap-3 flex-wrap items-center">
+                                {THEMES.map((t) => (
+                                    <button
+                                        key={t.id}
+                                        onClick={() => setTheme(t.id as ThemeId)}
+                                        title={t.label}
+                                        className={`w-10 h-10 rounded-full border-4 transition-all hover:scale-110 ${themeId === t.id ? 'border-white scale-110' : 'border-transparent'}`}
+                                        style={{ backgroundColor: t.primary }}
+                                    />
+                                ))}
+                                {/* 사용자 지정 컬러 피커 */}
+                                <div className="relative">
+                                    <input
+                                        ref={colorPickerRef}
+                                        type="color"
+                                        className="absolute opacity-0 w-0 h-0"
+                                        value={customColor}
+                                        onChange={(e) => setCustomColor(e.target.value)}
+                                    />
+                                    <button
+                                        onClick={() => colorPickerRef.current?.click()}
+                                        title="사용자 지정 색상"
+                                        className={`w-10 h-10 rounded-full border-4 transition-all hover:scale-110 overflow-hidden ${themeId === 'custom' ? 'border-white scale-110' : 'border-transparent'
+                                            }`}
+                                        style={{
+                                            background: themeId === 'custom'
+                                                ? customColor
+                                                : 'conic-gradient(red, yellow, lime, cyan, blue, magenta, red)',
+                                        }}
+                                    />
+                                </div>
+                            </div>
+                            <p className="text-xs text-zinc-500">
+                                현재: <span className="font-medium" style={{ color: 'var(--primary)' }}>
+                                    {themeId === 'custom'
+                                        ? `사용자 지정 (${customColor})`
+                                        : THEMES.find(t => t.id === themeId)?.label}
+                                </span>
+                            </p>
+                        </div>
+                        <div className="space-y-2">
+                            <label className="text-sm font-medium text-zinc-300 flex items-center gap-2">
+                                <Type className="w-4 h-4" />
+                                페이지 타이틀
+                            </label>
+                            <div className="flex gap-2">
+                                <input
+                                    type="text"
+                                    maxLength={32}
+                                    value={titleInput}
+                                    onChange={(e) => setTitleInput(e.target.value)}
+                                    placeholder="Chzzk Recorder Pro"
+                                    className="flex-1 bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-2 text-white focus:outline-none"
+                                    style={{ borderColor: titleInput !== pageTitle ? 'var(--primary)' : '' }}
+                                />
+                                <button
+                                    onClick={() => setPageTitle(titleInput)}
+                                    className="px-4 py-2 rounded-lg text-sm font-medium text-black transition-colors"
+                                    style={{ backgroundColor: 'var(--primary)' }}
+                                >
+                                    적용
+                                </button>
+                            </div>
+                            <p className="text-xs text-zinc-500">브라우저 탭 제목이 변경됩니다 (최대 32자)</p>
+                        </div>
+                        <div className="space-y-2">
+                            <label className="text-sm font-medium text-zinc-300 flex items-center gap-2">
+                                <ImageIcon className="w-4 h-4" />
+                                탭 아이콘 (Favicon)
+                            </label>
+                            <div className="flex gap-2">
+                                <input
+                                    ref={iconInputRef}
+                                    type="file"
+                                    accept="image/png,image/jpeg,image/webp,image/gif"
+                                    className="hidden"
+                                    onChange={(e) => {
+                                        const file = e.target.files?.[0];
+                                        if (!file) return;
+                                        if (file.size > 512 * 1024) { alert('파일 크기는 512KB 이하여야 합니다.'); return; }
+                                        const reader = new FileReader();
+                                        reader.onload = (ev) => setIconUrl(ev.target?.result as string);
+                                        reader.readAsDataURL(file);
+                                    }}
+                                />
+                                <button
+                                    onClick={() => iconInputRef.current?.click()}
+                                    className="flex-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 py-2 rounded-lg text-sm transition-colors flex items-center justify-center gap-2"
+                                >
+                                    <ImageIcon className="w-4 h-4" />
+                                    이미지 업로드 (PNG · JPG · WEBP, 512KB 이하)
+                                </button>
+                            </div>
+                            <p className="text-xs text-zinc-500">브라우저 탭 좌측 아이콘이 변경됩니다</p>
+                        </div>
+                        <button
+                            onClick={() => { resetAll(); setTitleInput('Chzzk Recorder Pro'); }}
+                            className="w-full bg-zinc-800 hover:bg-zinc-700 text-zinc-400 py-2.5 rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
+                        >
+                            <RotateCcw className="w-4 h-4" />
+                            외관 초기화 (기본값 복원)
+                        </button>
                     </div>
                 </div>
             </div>

@@ -272,3 +272,34 @@
 - [ ] **Docker**: Multi-stage `Dockerfile`, `docker-compose.yml` 작성
 - [ ] **Windows**: PyInstaller 패키징, 브라우저 자동 실행, 트레이 아이콘 고려
 - [ ] **Linux**: `install.sh`, `systemd` 서비스 등록 스크립트
+
+---
+
+## 2026-02-25: Docker 배포 + UI 개선
+
+### Docker 배포 환경 구축
+- [x] `Dockerfile` Multi-stage 빌드 작성 (Node.js frontend-builder + Python runtime)
+- [x] `docker-compose.yml` 작성 (volumes: recordings, data, logs, .env 마운트)
+- [x] `.dockerignore` 신규 생성 (recordings, dist, venv, node_modules 제외 — 빌드 컨텍스트 최적화)
+- [x] `docs/docker-guide.md` Docker 사용 가이드 문서 작성
+- [x] `docs/linux-guide.md` Linux 네이티브 설치 가이드 작성
+
+### Docker 초기 설정 감지 버그 수정
+- [x] `docker-compose.yml` entrypoint: `touch /app/.env` 제거 → 빈 .env 강제 생성으로 마법사가 뜨지 않던 버그 수정
+  - 대신 디렉토리로 잘못 마운트된 경우 정리 후 서버 기동
+- [x] `backend/app/api/setup.py` `is_setup_complete()`: 파일 존재 여부 → `DOWNLOAD_DIR` 키 실제 설정 여부로 강화
+  - 빈 .env 파일도 미완성으로 판단하여 마법사 재표시
+
+### UI: 컬러 테마 적용 버그 수정
+- [x] `frontend/src/components/layout/Sidebar.tsx`: 하드코딩된 Tailwind green 클래스 → CSS 변수(`var(--primary)`) 기반으로 전환
+  - `text-green-400`, `bg-green-500/10` 등 → `style={{ color: "var(--primary)" }}`
+  - 활성 네비게이션 항목: `.nav-active` CSS 클래스로 통합
+- [x] `frontend/src/index.css`: `.nav-active` 유틸리티 클래스 추가 (CSS 변수 기반 테마 색상 자동 적용)
+
+### UI: 헤더 로고 → 아이콘 + 탭 이름으로 교체
+- [x] `frontend/src/components/layout/Sidebar.tsx`: `useTheme()` 연결
+  - 하드코딩 "Chzzk Pro" 텍스트 제거
+  - 커스텀 favicon 설정 시: 업로드 이미지를 아이콘으로 표시
+  - favicon 없을 시: 기본 Tv 아이콘 (테마 색상 적용)
+  - 제목: `pageTitle` (Settings에서 설정한 탭 이름) 표시
+- [x] Docker 컨테이너 재빌드 및 동작 검증 완료
