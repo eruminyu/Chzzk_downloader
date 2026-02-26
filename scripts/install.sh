@@ -140,6 +140,18 @@ install_dependencies() {
     fi
     PYTHON_CMD="python3.12"
     info "Python 3.12 설치 완료 ✓"
+  else
+    # Python은 있지만 venv 패키지가 없을 수 있음 (Ubuntu deadsnakes 등)
+    if [ "$PKG_MANAGER" = "apt" ]; then
+      PY_MINOR=$("$PYTHON_CMD" -c 'import sys; print(sys.version_info.minor)')
+      PY_VENV_PKG="python3.${PY_MINOR}-venv"
+      if ! "$PYTHON_CMD" -c 'import ensurepip' 2>/dev/null; then
+        info "${PY_VENV_PKG} 설치 중..."
+        sudo apt-get install -y "$PY_VENV_PKG" 2>/dev/null || \
+          sudo apt-get install -y python3-venv
+        info "venv 패키지 설치 완료 ✓"
+      fi
+    fi
   fi
 
   # Node.js 18+ (프론트엔드 빌드용)
