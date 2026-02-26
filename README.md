@@ -34,51 +34,97 @@
 
 ## 🚀 설치 및 실행
 
-### ⚡ 빠른 시작 — 원라이너
+사용 환경에 맞는 방법을 선택하세요:
 
-#### 🐧 Linux / macOS (Native 설치)
+| 환경 | 방법 | 난이도 |
+|------|------|--------|
+| 🪟 Windows | `.exe` 실행 파일 | ⭐ 가장 쉬움 |
+| 🐧 Linux / macOS | 원라이너 스크립트 (Native) | ⭐ 가장 쉬움 |
+| 🐳 Linux / macOS | 원라이너 스크립트 (Docker) | ⭐ 가장 쉬움 |
+| ⚙️ 모든 OS | 직접 실행 (개발자용) | 🔧 고급 |
 
-OS 감지 → 의존성 설치 → 빌드 → systemd 등록까지 전부 자동:
+---
+
+### 🪟 Windows — `.exe` 실행 파일
+
+> **Python 설치 불필요!** Python 인터프리터가 내장되어 있어 더블클릭만으로 바로 실행됩니다.
+
+1. [Releases 페이지](https://github.com/eruminyu/Chzzk_downloader/releases)에서 최신 `chzzk-recorder-pro.exe` 다운로드
+2. 파일 더블클릭 → 서버 자동 시작
+3. 브라우저에서 `http://localhost:8000` 접속
+
+> ⚠️ Windows Defender가 경고를 표시할 수 있습니다. **"추가 정보" → "실행"** 을 눌러 허용하세요.  
+> (서명되지 않은 exe 파일에서 흔히 발생하는 현상입니다)
+
+---
+
+### 🐧 Linux / macOS — 원라이너 (Native 설치)
+
+터미널에 아래 명령어 하나를 붙여넣으세요.  
+OS 감지부터 의존성 설치, 빌드, systemd 등록까지 전부 자동으로 처리합니다.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/eruminyu/Chzzk_downloader/main/scripts/install.sh | bash
 ```
 
-#### 🐳 Linux / macOS (Docker 설치)
+**자동 처리 목록:**
+- Ubuntu / Debian / CentOS / Fedora / Arch 자동 감지
+- Python 3.12, ffmpeg, Node.js, streamlink 자동 설치
+- 프론트엔드 빌드 (React → 정적 파일)
+- Python 가상환경 생성 및 의존성 설치
+- systemd 서비스 등록 (부팅 시 자동 실행, 선택)
 
-Docker가 없어도 OK — Docker Engine 설치까지 자동으로 처리:
+> 📖 상세 가이드: [Linux 설치 가이드](./docs/linux-guide.md)
+
+---
+
+### 🐳 Linux / macOS — 원라이너 (Docker)
+
+Docker가 없는 서버에서도 OK. Docker Engine 설치까지 포함합니다.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/eruminyu/Chzzk_downloader/main/scripts/install-docker.sh | bash
 ```
 
-설치 완료 후 `http://localhost:8000` 으로 접속하세요.
+**자동 처리 목록:**
+- Docker Engine 미설치 시 자동 설치 (공식 `get.docker.com` 사용)
+- Docker Compose 플러그인 자동 설치
+- 저장소 클론 → 이미지 빌드 → 백그라운드 실행
+- 헬스체크로 정상 시작 확인
 
-> 📖 상세 가이드: [Linux 설치 가이드](./docs/linux-guide.md) | [Docker 가이드](./docs/docker-guide.md)
+> 📖 상세 가이드: [Docker 가이드](./docs/docker-guide.md)
 
 ---
 
-### 방법 3: 직접 실행 (개발자용)
+### ⚙️ 직접 실행 (개발자용)
 
-Python 3.10 이상과 Node.js 18 이상, `ffmpeg`가 설치되어 있어야 합니다.
+Python 3.10+, Node.js 18+, `ffmpeg`가 사전 설치되어 있어야 합니다.
 
-#### Backend
 ```bash
-cd backend
-python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
-pip install -r requirements.txt
+# 저장소 클론
+git clone https://github.com/eruminyu/Chzzk_downloader.git
+cd Chzzk_downloader
+
+# 프론트엔드 빌드
+cd frontend && npm ci && npm run build
+cp -r dist ../backend/app/static && cd ..
+
+# Python 환경 설정
+python -m venv .venv
+# Windows:
+.venv\Scripts\activate
+# Linux/macOS:
+source .venv/bin/activate
+
+pip install -r backend/requirements.txt
 
 # 서버 실행
-python run.py
+cd backend && python run.py
 ```
 
-#### Frontend
-```bash
-cd frontend
-npm install
-npm run dev
-```
+브라우저에서 `http://localhost:8000` 접속
+
+> `.bat` 파일(`scripts/start.bat`)은 이미 환경이 구성된 개발자가 빠르게 서버를 시작할 때 사용합니다.
 
 ---
 
@@ -86,7 +132,7 @@ npm run dev
 
 ### 1. 치지직 인증 (성인 방송 녹화)
 성인 인증이 필요한 방송을 녹화하려면 네이버 로그인 쿠키가 필요합니다.
-1. 웹 브라우저에서 네이버 로그인 후 개발자 도구(F12) -> Application -> Cookies를 엽니다.
+1. 웹 브라우저에서 네이버 로그인 후 개발자 도구(F12) → Application → Cookies를 엽니다.
 2. `NID_AUT`와 `NID_SES` 값을 복사합니다.
 3. Chzzk-Recorder-Pro 설정 페이지(Settings)에서 해당 값을 입력하고 저장합니다.
 
@@ -107,13 +153,13 @@ Chzzk-Recorder-Pro/
 │   │   ├── api/        # REST API 엔드포인트
 │   │   ├── engine/     # 녹화 및 다운로드 코어 로직
 │   │   └── services/   # 비즈니스 로직 서비스
-│   ├── data/           # 설정 및 이력 데이터 (JSON)
-│   └── recordings/     # (기본) 녹화 파일 저장소
+│   └── data/           # 설정 및 이력 데이터 (JSON)
 ├── frontend/
-│   ├── src/
-│   │   ├── api/        # API 클라이언트
-│   │   ├── components/ # UI 컴포넌트
-│   │   └── pages/      # 페이지
+│   └── src/
+│       ├── api/        # API 클라이언트
+│       ├── components/ # UI 컴포넌트
+│       └── pages/      # 페이지
+├── scripts/            # 설치 스크립트 (install.sh, install-docker.sh)
 └── docs/               # 프로젝트 문서
 ```
 
