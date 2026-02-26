@@ -2,7 +2,7 @@
 # ═══════════════════════════════════════════════════════════════
 #  Chzzk Recorder Pro — Docker 설치 스크립트
 #  사용법 (원라이너):
-#    curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/Chzzk_downloader/main/scripts/install-docker.sh | bash
+#    curl -fsSL https://raw.githubusercontent.com/eruminyu/Chzzk_downloader/main/scripts/install-docker.sh | bash
 #
 #  지원 OS: Ubuntu 20.04+, Debian 11+, CentOS/RHEL 8+, Fedora 36+
 #  필요: curl (스크립트 실행에 필요)
@@ -17,7 +17,7 @@ CYAN='\033[0;36m'
 BOLD='\033[1m'
 NC='\033[0m'
 
-REPO_URL="https://github.com/YOUR_USERNAME/Chzzk_downloader.git"
+REPO_URL="https://github.com/eruminyu/Chzzk_downloader.git"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/chzzk-recorder-pro}"
 PORT="${PORT:-8000}"
 

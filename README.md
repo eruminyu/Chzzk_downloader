@@ -41,7 +41,7 @@
 OS 감지 → 의존성 설치 → 빌드 → systemd 등록까지 전부 자동:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/Chzzk_downloader/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/eruminyu/Chzzk_downloader/main/scripts/install.sh | bash
 ```
 
 #### 🐳 Linux / macOS (Docker 설치)
@@ -49,7 +49,7 @@ curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/Chzzk_downloader/main
 Docker가 없어도 OK — Docker Engine 설치까지 자동으로 처리:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/Chzzk_downloader/main/scripts/install-docker.sh | bash
+curl -fsSL https://raw.githubusercontent.com/eruminyu/Chzzk_downloader/main/scripts/install-docker.sh | bash
 ```
 
 설치 완료 후 `http://localhost:8000` 으로 접속하세요.

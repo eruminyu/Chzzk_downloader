@@ -18,7 +18,7 @@ Linux 환경에서는 세 가지 방식으로 설치할 수 있습니다:
 OS 감지 → 의존성 설치 → 빌드 → venv 설정 → systemd 등록까지 전부 자동으로 처리합니다.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/Chzzk_downloader/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/eruminyu/Chzzk_downloader/main/scripts/install.sh | bash
 ```
 
 **자동으로 처리되는 것들:**
@@ -30,7 +30,7 @@ curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/Chzzk_downloader/main
 
 > **설치 경로 변경:** 기본 설치 경로는 `~/chzzk-recorder-pro` 입니다.
 > ```bash
-> INSTALL_DIR=/opt/chzzk-recorder curl -fsSL https://raw.githubusercontent.com/.../install.sh | bash
+> INSTALL_DIR=/opt/chzzk-recorder curl -fsSL https://raw.githubusercontent.com/eruminyu/Chzzk_downloader/main/scripts/install.sh | bash
 > ```
 
 ---
@@ -40,7 +40,7 @@ curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/Chzzk_downloader/main
 Docker가 없는 서버에도 사용 가능합니다. Docker Engine 설치까지 자동으로 처리합니다.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/Chzzk_downloader/main/scripts/install-docker.sh | bash
+curl -fsSL https://raw.githubusercontent.com/eruminyu/Chzzk_downloader/main/scripts/install-docker.sh | bash
 ```
 
 **자동으로 처리되는 것들:**
@@ -71,7 +71,7 @@ pip3 install streamlink
 
 ```bash
 # 저장소 클론
-git clone https://github.com/YOUR_USERNAME/Chzzk_downloader.git
+git clone https://github.com/eruminyu/Chzzk_downloader.git
 cd Chzzk_downloader
 
 # 프론트엔드 빌드

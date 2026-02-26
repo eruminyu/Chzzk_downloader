@@ -2,7 +2,7 @@
 # ═══════════════════════════════════════════════════════════════
 #  Chzzk Recorder Pro — Linux Native 설치 스크립트
 #  사용법 (원라이너):
-#    curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/Chzzk_downloader/main/scripts/install.sh | bash
+#    curl -fsSL https://raw.githubusercontent.com/eruminyu/Chzzk_downloader/main/scripts/install.sh | bash
 #
 #  지원 OS: Ubuntu 20.04+, Debian 11+, CentOS/RHEL 8+, Fedora 36+, Arch Linux
 # ═══════════════════════════════════════════════════════════════
@@ -17,7 +17,7 @@ CYAN='\033[0;36m'
 BOLD='\033[1m'
 NC='\033[0m'
 
-REPO_URL="https://github.com/YOUR_USERNAME/Chzzk_downloader.git"
+REPO_URL="https://github.com/eruminyu/Chzzk_downloader.git"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/chzzk-recorder-pro}"
 REQUIRED_PYTHON_MINOR=10   # 3.10+
 
@@ -252,7 +252,7 @@ install_service() {
     sudo tee "$SERVICE_FILE" > /dev/null <<EOF
 [Unit]
 Description=Chzzk Recorder Pro - Live Stream Recorder
-Documentation=https://github.com/YOUR_USERNAME/Chzzk_downloader
+Documentation=https://github.com/eruminyu/Chzzk_downloader
 After=network-online.target
 Wants=network-online.target
 
