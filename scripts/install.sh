@@ -1,104 +1,325 @@
 #!/usr/bin/env bash
-# ─────────────────────────────────────────────────────────────
-# Chzzk-Recorder-Pro Linux 설치 스크립트
-# 지원: Ubuntu 20.04+, Debian 11+, Fedora 36+, Arch Linux
-# 사용: bash scripts/install.sh
-# ─────────────────────────────────────────────────────────────
-set -e
+# ═══════════════════════════════════════════════════════════════
+#  Chzzk Recorder Pro — Linux Native 설치 스크립트
+#  사용법 (원라이너):
+#    curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/Chzzk_downloader/main/scripts/install.sh | bash
+#
+#  지원 OS: Ubuntu 20.04+, Debian 11+, CentOS/RHEL 8+, Fedora 36+, Arch Linux
+# ═══════════════════════════════════════════════════════════════
+set -euo pipefail
 
-REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-VENV_DIR="$REPO_DIR/.venv"
+# ── 색상 & 아이콘 ──────────────────────────────────────────────
+RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-RED='\033[0;31m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
 NC='\033[0m'
 
-echo ""
-echo "  ██████╗ ██╗  ██╗███████╗███████╗██╗  ██╗"
-echo "  ██╔════╝██║  ██║╚══███╔╝╚══███╔╝██║ ██╔╝"
-echo "  ██║     ███████║  ███╔╝   ███╔╝ █████╔╝ "
-echo "  ██║     ██╔══██║ ███╔╝   ███╔╝  ██╔═██╗ "
-echo "  ╚██████╗██║  ██║███████╗███████╗██║  ██╗"
-echo "   ╚═════╝╚═╝  ╚═╝╚══════╝╚══════╝╚═╝  ╚═╝"
-echo "   Recorder Pro - Linux Installer"
-echo ""
+REPO_URL="https://github.com/YOUR_USERNAME/Chzzk_downloader.git"
+INSTALL_DIR="${INSTALL_DIR:-$HOME/chzzk-recorder-pro}"
+REQUIRED_PYTHON_MINOR=10   # 3.10+
 
-log_info()  { echo -e "${GREEN}[INFO]${NC}  $1"; }
-log_warn()  { echo -e "${YELLOW}[WARN]${NC}  $1"; }
-log_error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
+# ── 출력 헬퍼 ─────────────────────────────────────────────────
+info()    { echo -e "${GREEN}[✔]${NC} $1"; }
+warn()    { echo -e "${YELLOW}[!]${NC} $1"; }
+error()   { echo -e "${RED}[✘]${NC} $1"; exit 1; }
+step()    { echo -e "\n${BOLD}${CYAN}▶ $1${NC}"; }
+banner()  {
+  echo ""
+  echo -e "${CYAN}${BOLD}"
+  echo "  ██████╗██╗  ██╗███████╗███████╗██╗  ██╗"
+  echo " ██╔════╝██║  ██║╚══███╔╝╚══███╔╝██║ ██╔╝"
+  echo " ██║     ███████║  ███╔╝   ███╔╝ █████╔╝ "
+  echo " ██║     ██╔══██║ ███╔╝   ███╔╝  ██╔═██╗ "
+  echo " ╚██████╗██║  ██║███████╗███████╗██║  ██╗"
+  echo "  ╚═════╝╚═╝  ╚═╝╚══════╝╚══════╝╚═╝  ╚═╝"
+  echo -e "${NC}${BOLD}   Recorder Pro — Linux Native Installer${NC}"
+  echo ""
+}
 
-# ── 1. 사전 요구사항 확인 ─────────────────────────────────
-log_info "사전 요구사항 확인 중..."
+# ── OS 감지 ───────────────────────────────────────────────────
+detect_os() {
+  if [ -f /etc/os-release ]; then
+    . /etc/os-release
+    OS_ID="${ID:-unknown}"
+    OS_ID_LIKE="${ID_LIKE:-}"
+  else
+    error "지원하지 않는 OS입니다. /etc/os-release 파일이 없습니다."
+  fi
 
-# Python 3.10+
-if command -v python3 &>/dev/null; then
-    PY_VER=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
-    PY_MAJOR=$(echo "$PY_VER" | cut -d. -f1)
-    PY_MINOR=$(echo "$PY_VER" | cut -d. -f2)
-    if [ "$PY_MAJOR" -lt 3 ] || { [ "$PY_MAJOR" -eq 3 ] && [ "$PY_MINOR" -lt 10 ]; }; then
-        log_error "Python 3.10 이상이 필요합니다. 현재 버전: $PY_VER"
+  # Debian 계열 (Ubuntu, Debian, Linux Mint, Pop!_OS, ...)
+  if echo "$OS_ID $OS_ID_LIKE" | grep -qiE "ubuntu|debian"; then
+    PKG_MANAGER="apt"
+  # RHEL 계열 (CentOS, AlmaLinux, Rocky, Fedora, ...)
+  elif echo "$OS_ID $OS_ID_LIKE" | grep -qiE "fedora|rhel|centos|almalinux|rocky"; then
+    if command -v dnf &>/dev/null; then PKG_MANAGER="dnf"; else PKG_MANAGER="yum"; fi
+  # Arch 계열
+  elif echo "$OS_ID $OS_ID_LIKE" | grep -qi "arch"; then
+    PKG_MANAGER="pacman"
+  else
+    PKG_MANAGER="unknown"
+    warn "알 수 없는 OS (${OS_ID}). 수동으로 의존성을 설치해야 할 수 있습니다."
+  fi
+  info "OS 감지 완료: ${PRETTY_NAME:-$OS_ID} (패키지 매니저: $PKG_MANAGER)"
+}
+
+# ── 패키지 설치 헬퍼 ──────────────────────────────────────────
+pkg_install() {
+  local pkg="$1"
+  case "$PKG_MANAGER" in
+    apt)    sudo apt-get install -y "$pkg" ;;
+    dnf)    sudo dnf install -y "$pkg" ;;
+    yum)    sudo yum install -y "$pkg" ;;
+    pacman) sudo pacman -S --noconfirm "$pkg" ;;
+    *)      error "패키지 매니저를 알 수 없어 $pkg 를 설치할 수 없습니다. 수동 설치 후 다시 실행하세요." ;;
+  esac
+}
+
+# ── 1. 시스템 의존성 설치 ─────────────────────────────────────
+install_dependencies() {
+  step "시스템 의존성 확인 및 설치"
+
+  # git
+  if ! command -v git &>/dev/null; then
+    info "git 설치 중..."
+    pkg_install git
+  fi
+  info "git $(git --version | awk '{print $3}') ✓"
+
+  # curl
+  if ! command -v curl &>/dev/null; then
+    info "curl 설치 중..."
+    pkg_install curl
+  fi
+  info "curl ✓"
+
+  # ffmpeg
+  if ! command -v ffmpeg &>/dev/null; then
+    info "ffmpeg 설치 중..."
+    if [ "$PKG_MANAGER" = "apt" ]; then
+      sudo apt-get update -qq
+      pkg_install ffmpeg
+    elif [ "$PKG_MANAGER" = "dnf" ] || [ "$PKG_MANAGER" = "yum" ]; then
+      # RHEL 계열은 RPM Fusion이 필요할 수 있음
+      sudo "$PKG_MANAGER" install -y epel-release 2>/dev/null || true
+      pkg_install ffmpeg
+    else
+      pkg_install ffmpeg
     fi
-    log_info "Python $PY_VER ✓"
-else
-    log_error "Python 3이 설치되어 있지 않습니다. 설치 후 다시 실행하세요."
-fi
+  fi
+  info "ffmpeg $(ffmpeg -version 2>&1 | head -1 | awk '{print $3}') ✓"
 
-# ffmpeg
-if ! command -v ffmpeg &>/dev/null; then
-    log_warn "ffmpeg가 설치되어 있지 않습니다."
-    echo "  Ubuntu/Debian: sudo apt install ffmpeg"
-    echo "  Fedora:        sudo dnf install ffmpeg"
-    echo "  Arch:          sudo pacman -S ffmpeg"
-    log_error "ffmpeg 설치 후 다시 실행하세요."
-fi
-log_info "ffmpeg ✓"
+  # Python 3.10+
+  PYTHON_CMD=""
+  for cmd in python3.12 python3.11 python3.10 python3; do
+    if command -v "$cmd" &>/dev/null; then
+      VER=$("$cmd" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+      MINOR=$(echo "$VER" | cut -d. -f2)
+      if [ "$MINOR" -ge "$REQUIRED_PYTHON_MINOR" ]; then
+        PYTHON_CMD="$cmd"
+        info "Python $VER ✓ ($cmd)"
+        break
+      fi
+    fi
+  done
 
-# streamlink
-if ! command -v streamlink &>/dev/null; then
-    log_warn "streamlink가 설치되어 있지 않습니다."
-    echo "  pip: pip install streamlink"
-    echo "  또는 시스템 패키지 매니저로 설치하세요."
-    log_error "streamlink 설치 후 다시 실행하세요."
-fi
-log_info "streamlink ✓"
+  if [ -z "$PYTHON_CMD" ]; then
+    info "Python 3.12 설치 중..."
+    if [ "$PKG_MANAGER" = "apt" ]; then
+      sudo apt-get update -qq
+      sudo apt-get install -y software-properties-common
+      sudo add-apt-repository -y ppa:deadsnakes/ppa
+      sudo apt-get update -qq
+      sudo apt-get install -y python3.12 python3.12-venv python3.12-distutils
+    elif [ "$PKG_MANAGER" = "dnf" ]; then
+      sudo dnf install -y python3.12
+    else
+      error "Python 3.10+ 를 찾을 수 없습니다. 수동으로 설치 후 다시 실행하세요.\n  https://www.python.org/downloads/"
+    fi
+    PYTHON_CMD="python3.12"
+    info "Python 3.12 설치 완료 ✓"
+  fi
 
-# git
-if ! command -v git &>/dev/null; then
-    log_warn "git이 설치되어 있지 않습니다 (선택사항)."
-fi
+  # Node.js 18+ (프론트엔드 빌드용)
+  NODE_OK=false
+  if command -v node &>/dev/null; then
+    NODE_VER=$(node -e 'process.stdout.write(process.versions.node)')
+    NODE_MAJOR=$(echo "$NODE_VER" | cut -d. -f1)
+    if [ "$NODE_MAJOR" -ge 18 ]; then
+      NODE_OK=true
+      info "Node.js v$NODE_VER ✓"
+    fi
+  fi
 
-# ── 2. 가상환경 생성 ─────────────────────────────────────
-log_info "Python 가상환경 생성 중: $VENV_DIR"
-python3 -m venv "$VENV_DIR"
-log_info "가상환경 생성 완료 ✓"
+  if [ "$NODE_OK" = "false" ]; then
+    info "Node.js 22 LTS 설치 중 (NodeSource)..."
+    curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - 2>/dev/null || \
+    curl -fsSL https://rpm.nodesource.com/setup_22.x | sudo bash - 2>/dev/null || \
+    error "Node.js 설치 실패. https://nodejs.org 에서 수동 설치하세요."
+    pkg_install nodejs || error "Node.js 설치 실패"
+    info "Node.js $(node --version) ✓"
+  fi
+}
 
-# ── 3. 의존성 설치 ───────────────────────────────────────
-log_info "Python 의존성 설치 중..."
-"$VENV_DIR/bin/pip" install --upgrade pip -q
-"$VENV_DIR/bin/pip" install -r "$REPO_DIR/backend/requirements.txt" -q
-log_info "의존성 설치 완료 ✓"
+# ── 2. 저장소 클론 ────────────────────────────────────────────
+clone_repo() {
+  step "저장소 클론"
 
-# ── 4. .env 파일 설정 ─────────────────────────────────────
-if [ ! -f "$REPO_DIR/.env" ]; then
-    log_info ".env 파일 생성 중... (.env.example 복사)"
-    cp "$REPO_DIR/.env.example" "$REPO_DIR/.env"
-    log_warn ".env 파일을 편집하여 NID_AUT, NID_SES 등을 설정하세요."
-else
-    log_info ".env 파일이 이미 존재합니다. 건너뜁니다."
-fi
+  if [ -d "$INSTALL_DIR/.git" ]; then
+    warn "이미 설치된 저장소가 있습니다: $INSTALL_DIR"
+    warn "최신 버전으로 업데이트합니다..."
+    git -C "$INSTALL_DIR" pull --ff-only
+  else
+    info "저장소를 $INSTALL_DIR 에 클론 중..."
+    git clone "$REPO_URL" "$INSTALL_DIR"
+  fi
+  info "저장소 준비 완료 ✓"
+}
 
-# ── 5. 디렉토리 생성 ─────────────────────────────────────
-mkdir -p "$REPO_DIR/recordings" "$REPO_DIR/data" "$REPO_DIR/logs"
-log_info "데이터 디렉토리 생성 완료 ✓"
+# ── 3. 프론트엔드 빌드 ─────────────────────────────────────────
+build_frontend() {
+  step "프론트엔드 빌드 (React → 정적 파일)"
 
-# ── 완료 ─────────────────────────────────────────────────
-echo ""
-echo -e "${GREEN}✅ 설치 완료!${NC}"
-echo ""
-echo "  서버 실행 방법:"
-echo "    cd $REPO_DIR/backend"
-echo "    ../.venv/bin/python run.py"
-echo ""
-echo "  systemd 서비스 등록 (부팅 시 자동 실행):"
-echo "    sudo bash $REPO_DIR/scripts/setup_service.sh"
-echo ""
+  cd "$INSTALL_DIR/frontend"
+  info "npm ci 실행 중..."
+  npm ci --silent
+  info "npm run build 실행 중..."
+  npm run build
+
+  # 빌드 결과물을 백엔드 static으로 복사
+  STATIC_DIR="$INSTALL_DIR/backend/app/static"
+  mkdir -p "$STATIC_DIR"
+  cp -r dist/* "$STATIC_DIR/"
+  info "프론트엔드 빌드 완료 ✓"
+  cd "$INSTALL_DIR"
+}
+
+# ── 4. Python 가상환경 & 의존성 ───────────────────────────────
+setup_python() {
+  step "Python 가상환경 설정"
+
+  VENV_DIR="$INSTALL_DIR/.venv"
+  "$PYTHON_CMD" -m venv "$VENV_DIR"
+  info "가상환경 생성 완료: $VENV_DIR"
+
+  info "pip 업데이트 중..."
+  "$VENV_DIR/bin/pip" install --upgrade pip -q
+
+  info "Python 의존성 설치 중..."
+  "$VENV_DIR/bin/pip" install -r "$INSTALL_DIR/backend/requirements.txt" -q
+
+  # streamlink (pip으로 설치)
+  info "streamlink 설치 중..."
+  "$VENV_DIR/bin/pip" install streamlink -q
+  info "Python 의존성 설치 완료 ✓"
+}
+
+# ── 5. 데이터 디렉토리 생성 ──────────────────────────────────
+setup_dirs() {
+  step "데이터 디렉토리 생성"
+  mkdir -p "$INSTALL_DIR/recordings" "$INSTALL_DIR/data" "$INSTALL_DIR/logs"
+  info "디렉토리 생성 완료 ✓"
+}
+
+# ── 6. 실행 스크립트 생성 ─────────────────────────────────────
+create_launcher() {
+  step "실행 스크립트 생성"
+
+  LAUNCHER="$INSTALL_DIR/start.sh"
+  cat > "$LAUNCHER" <<EOF
+#!/usr/bin/env bash
+# Chzzk Recorder Pro 실행 스크립트
+cd "$(dirname "\$(realpath "\$0")")/backend"
+exec "../.venv/bin/python" run.py "\$@"
+EOF
+  chmod +x "$LAUNCHER"
+  info "실행 스크립트 생성 완료: $LAUNCHER ✓"
+}
+
+# ── 7. systemd 서비스 설치 (선택) ────────────────────────────
+install_service() {
+  if ! command -v systemctl &>/dev/null; then
+    warn "systemd를 찾을 수 없습니다. 서비스 설치를 건너뜁니다."
+    return 0
+  fi
+
+  echo ""
+  read -rp "$(echo -e "${YELLOW}[?]${NC} systemd 서비스로 등록하시겠습니까? (부팅 시 자동 실행) [y/N]: ")" REPLY
+  if [[ "$REPLY" =~ ^[Yy]$ ]]; then
+    SERVICE_FILE="/etc/systemd/system/chzzk-recorder.service"
+    sudo tee "$SERVICE_FILE" > /dev/null <<EOF
+[Unit]
+Description=Chzzk Recorder Pro - Live Stream Recorder
+Documentation=https://github.com/YOUR_USERNAME/Chzzk_downloader
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=$(whoami)
+WorkingDirectory=$INSTALL_DIR/backend
+ExecStart=$INSTALL_DIR/.venv/bin/python run.py
+Restart=on-failure
+RestartSec=10
+StandardOutput=append:$INSTALL_DIR/logs/service.log
+StandardError=append:$INSTALL_DIR/logs/service-error.log
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    sudo systemctl daemon-reload
+    sudo systemctl enable chzzk-recorder
+    sudo systemctl start chzzk-recorder
+    info "systemd 서비스 등록 및 시작 완료 ✓"
+    info "서비스 상태: sudo systemctl status chzzk-recorder"
+  else
+    info "서비스 등록을 건너뜁니다."
+  fi
+}
+
+# ── 완료 메시지 ──────────────────────────────────────────────
+print_done() {
+  echo ""
+  echo -e "${GREEN}${BOLD}╔════════════════════════════════════════════╗${NC}"
+  echo -e "${GREEN}${BOLD}║      🎉 설치가 완료되었습니다!             ║${NC}"
+  echo -e "${GREEN}${BOLD}╚════════════════════════════════════════════╝${NC}"
+  echo ""
+  echo -e "  ${BOLD}▶ 수동 실행:${NC}"
+  echo -e "    ${CYAN}$INSTALL_DIR/start.sh${NC}"
+  echo ""
+  echo -e "  ${BOLD}▶ 접속 주소:${NC}"
+  echo -e "    ${CYAN}http://localhost:8000${NC}"
+  echo ""
+  echo -e "  ${BOLD}▶ 서비스 관리 (설치한 경우):${NC}"
+  echo -e "    sudo systemctl status chzzk-recorder"
+  echo -e "    sudo systemctl stop   chzzk-recorder"
+  echo -e "    sudo systemctl restart chzzk-recorder"
+  echo ""
+  echo -e "  ${BOLD}▶ 로그 확인:${NC}"
+  echo -e "    tail -f ${CYAN}$INSTALL_DIR/logs/service.log${NC}"
+  echo ""
+}
+
+# ── 메인 ──────────────────────────────────────────────────────
+main() {
+  banner
+
+  # root로 실행 방지 (서비스 설치 단계에서만 sudo 사용)
+  if [ "$EUID" -eq 0 ]; then
+    error "root로 실행하지 마세요. 일반 사용자 계정으로 실행하세요.\n  일부 단계에서 sudo 권한을 요청합니다."
+  fi
+
+  detect_os
+  install_dependencies
+  clone_repo
+  build_frontend
+  setup_python
+  setup_dirs
+  create_launcher
+  install_service
+  print_done
+}
+
+main "$@"

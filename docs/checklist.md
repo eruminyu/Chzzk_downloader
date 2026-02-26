@@ -303,3 +303,23 @@
   - favicon 없을 시: 기본 Tv 아이콘 (테마 색상 적용)
   - 제목: `pageTitle` (Settings에서 설정한 탭 이름) 표시
 - [x] Docker 컨테이너 재빌드 및 동작 검증 완료
+
+## 2026-02-26: 원라이너 설치 스크립트
+
+### 구현 내용
+- [x] `scripts/install.sh` — Linux Native 원라이너 설치 스크립트 전면 재작성
+  - `curl -fsSL .../install.sh | bash` 원라이너 지원
+  - Ubuntu/Debian/CentOS/Fedora/Arch OS 자동 감지 (`/etc/os-release`)
+  - Python 3.12 / ffmpeg / Node.js 18+ / streamlink 자동 설치
+  - 프론트엔드 빌드 (React → static) 포함
+  - venv 생성 + requirements.txt 설치
+  - systemd 서비스 등록 (선택, 인터랙티브)
+  - 설치 경로 환경변수 오버라이드 지원 (`INSTALL_DIR=...`)
+- [x] `scripts/install-docker.sh` — Docker 원라이너 설치 스크립트 신규 생성
+  - `curl -fsSL .../install-docker.sh | bash` 원라이너 지원
+  - Docker Engine 미설치 시 `get.docker.com` 공식 스크립트로 자동 설치
+  - Docker Compose (plugin v2 / standalone v1) 자동 감지 및 설치
+  - 포트 인터랙티브 설정 지원 (기본 8000)
+  - 헬스체크로 컨테이너 정상 시작 확인
+- [x] `docs/linux-guide.md` — 원라이너 섹션 최상단 배치, 수동 설치는 보조로 재구성
+- [x] `README.md` — 설치 섹션을 원라이너 중심으로 개편

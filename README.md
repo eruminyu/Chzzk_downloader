@@ -34,24 +34,33 @@
 
 ## 🚀 설치 및 실행
 
-### 방법 1: Docker (권장)
+### ⚡ 빠른 시작 — 원라이너
 
-가장 간편하고 깔끔한 설치 방법입니다.
+#### 🐧 Linux / macOS (Native 설치)
+
+OS 감지 → 의존성 설치 → 빌드 → systemd 등록까지 전부 자동:
 
 ```bash
-# 저장소 클론
-git clone https://github.com/your-repo/Chzzk-Recorder-Pro.git
-cd Chzzk-Recorder-Pro
-
-# 실행
-docker-compose up -d
+curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/Chzzk_downloader/main/scripts/install.sh | bash
 ```
 
-브라우저에서 `http://localhost:8000`으로 접속하세요.
+#### 🐳 Linux / macOS (Docker 설치)
 
-### 방법 2: 로컬 실행 (개발자용)
+Docker가 없어도 OK — Docker Engine 설치까지 자동으로 처리:
 
-Python 3.10 이상과 Node.js 18 이상이 필요합니다. 또한 시스템에 `ffmpeg`가 설치되어 있어야 합니다.
+```bash
+curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/Chzzk_downloader/main/scripts/install-docker.sh | bash
+```
+
+설치 완료 후 `http://localhost:8000` 으로 접속하세요.
+
+> 📖 상세 가이드: [Linux 설치 가이드](./docs/linux-guide.md) | [Docker 가이드](./docs/docker-guide.md)
+
+---
+
+### 방법 3: 직접 실행 (개발자용)
+
+Python 3.10 이상과 Node.js 18 이상, `ffmpeg`가 설치되어 있어야 합니다.
 
 #### Backend
 ```bash
@@ -61,7 +70,7 @@ source venv/bin/activate  # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 
 # 서버 실행
-python -m app.main
+python run.py
 ```
 
 #### Frontend
