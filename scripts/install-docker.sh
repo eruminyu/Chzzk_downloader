@@ -239,7 +239,7 @@ main() {
   banner
 
   if [ "$EUID" -eq 0 ]; then
-    error "root로 실행하지 마세요. 일반 사용자 계정으로 실행하세요."
+    warn "root로 실행 중입니다. 프로덕션 환경에서는 전용 사용자 계정 사용을 권장합니다."
   fi
 
   detect_os
