@@ -198,12 +198,9 @@ build_frontend() {
   info "npm ci 실행 중..."
   npm ci --silent
   info "npm run build 실행 중..."
+  # vite.config.ts의 outDir이 '../backend/app/static'으로 설정되어 있어
+  # 빌드 결과물이 자동으로 backend/app/static 에 직접 생성됨
   npm run build
-
-  # 빌드 결과물을 백엔드 static으로 복사
-  STATIC_DIR="$INSTALL_DIR/backend/app/static"
-  mkdir -p "$STATIC_DIR"
-  cp -r dist/* "$STATIC_DIR/"
   info "프론트엔드 빌드 완료 ✓"
   cd "$INSTALL_DIR"
 }

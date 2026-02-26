@@ -323,3 +323,16 @@
   - 헬스체크로 컨테이너 정상 시작 확인
 - [x] `docs/linux-guide.md` — 원라이너 섹션 최상단 배치, 수동 설치는 보조로 재구성
 - [x] `README.md` — 설치 섹션을 원라이너 중심으로 개편
+
+## 2026-02-26: browse_dirs 버그 수정 (Linux/Docker)
+
+### 원인
+- `GET /api/settings/browse-dirs` 호출 시 Linux 루트(`/`) 탐색에서 `/proc`, `/sys`, `/dev` 등 가상 파일시스템을 `list(entry.iterdir())`로 접근하면 `PermissionError`가 아닌 `OSError`가 발생
+- `except PermissionError`만 처리하여 500 에러 → 프론트에서 "디렉토리를 불러올 수 없습니다." 표시
+
+### 수정 내용
+- [x] `backend/app/api/settings.py` — `browse_dirs()` 함수 수정
+  - Linux 루트 탐색: `/proc`, `/sys`, `/dev`, `/run`, `/snap` 스킵 목록 추가
+  - 불필요한 `list(entry.iterdir())` 검사 제거 (표시에만 사용하므로 불필요)
+  - `except PermissionError` → `except OSError` 로 예외 범위 확장
+  - Linux Native / Docker 환경 동일 코드라 한 번에 해결

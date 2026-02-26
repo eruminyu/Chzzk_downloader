@@ -405,16 +405,17 @@ async def browse_dirs(
                 "dirs": [{"name": d, "path": d} for d in drives],
             }
         else:
+            # Linux/Docker: 가상 파일시스템 제외하고 실제 디렉토리만 탐색
+            SKIP_DIRS = {"/proc", "/sys", "/dev", "/run", "/snap"}
             root = Path("/")
             dirs = []
-            for entry in sorted(root.iterdir()):
-                if not entry.is_dir():
-                    continue
-                try:
-                    list(entry.iterdir())
+            try:
+                for entry in sorted(root.iterdir()):
+                    if not entry.is_dir() or str(entry) in SKIP_DIRS:
+                        continue
                     dirs.append({"name": entry.name, "path": str(entry)})
-                except PermissionError:
-                    continue
+            except OSError:
+                pass
             return {"current": "/", "parent": None, "dirs": dirs}
 
     target = Path(path).resolve()
@@ -435,12 +436,8 @@ async def browse_dirs(
         for entry in sorted(target.iterdir()):
             if not entry.is_dir():
                 continue
-            try:
-                list(entry.iterdir())
-            except PermissionError:
-                continue
             sub_dirs.append({"name": entry.name, "path": str(entry)})
-    except PermissionError:
+    except OSError:
         pass
 
     return {
