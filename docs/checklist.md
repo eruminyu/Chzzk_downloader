@@ -336,3 +336,16 @@
   - 불필요한 `list(entry.iterdir())` 검사 제거 (표시에만 사용하므로 불필요)
   - `except PermissionError` → `except OSError` 로 예외 범위 확장
   - Linux Native / Docker 환경 동일 코드라 한 번에 해결
+
+## 2026-03-11: 원격 접속 시 API 호출 실패 버그 수정
+
+### 원인
+- `frontend/src/api/client.ts`의 `API_BASE_URL`이 `"http://localhost:8000/api"`로 하드코딩
+- 리눅스 서버에서 실행하고 윈도우 PC 브라우저로 접속하면, axios 요청이 **윈도우 PC의 localhost**로 전송 → 모든 API 호출 실패
+- 디렉토리 탐색(찾아보기), 채널 목록, VOD 상태 등 axios 기반 모든 기능이 원격 접속 시 작동 불가
+
+### 수정 내용
+- [x] `frontend/src/api/client.ts`: `API_BASE_URL` = `"http://localhost:8000/api"` → `"/api"` (상대 경로)
+  - 프로덕션: 현재 접속한 호스트 기준으로 요청 전송 → 정상
+  - 개발 모드: `vite.config.ts` 프록시 (`/api` → `http://127.0.0.1:8000`) → 정상
+- [x] TypeScript 빌드 검증 통과
