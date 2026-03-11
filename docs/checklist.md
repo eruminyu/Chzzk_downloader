@@ -349,3 +349,16 @@
   - 프로덕션: 현재 접속한 호스트 기준으로 요청 전송 → 정상
   - 개발 모드: `vite.config.ts` 프록시 (`/api` → `http://127.0.0.1:8000`) → 정상
 - [x] TypeScript 빌드 검증 통과
+
+## 2026-03-12: Docker 환경 설정 저장/파일 저장 버그 수정
+
+### 원인
+- Dockerfile의 `appuser`(uid=1001)와 호스트 사용자(uid=1000/root)의 uid 불일치
+- bind mount된 `.env`, `recordings/` 등에 컨테이너에서 쓰기 권한 없음
+- `.env` 저장 실패 → 매번 초기 설정 마법사 재표시
+- `recordings/` 쓰기 실패 → 다운로드 파일 유실
+- `TZ` 환경변수 미설정 → UTC 동작 (KST 대비 9시간 차이)
+
+### 수정 내용
+- [x] `Dockerfile`: `USER appuser` 관련 3줄 제거 (root 실행, self-hosted 앱 표준 패턴)
+- [x] `docker-compose.yml`: `TZ=Asia/Seoul` 환경변수 추가

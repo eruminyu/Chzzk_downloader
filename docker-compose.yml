@@ -10,6 +10,7 @@ services:
     environment:
       # Docker 환경에서는 ffmpeg/streamlink가 시스템에 설치됨
       - FFMPEG_PATH=ffmpeg
+      - TZ=Asia/Seoul
     volumes:
       # .env: 초기설정 마법사 완료 시 생성, 재시작해도 설정 유지
       # (호스트에 .env가 없으면 Docker가 빈 디렉토리를 만드는데, entrypoint에서 정리함)
