@@ -9,6 +9,7 @@ import { DirInput } from "./ui/DirInput";
 
 interface SetupWizardProps {
     onComplete: () => void;
+    isDocker?: boolean;
 }
 
 type Step = 1 | 2 | 3;
@@ -72,7 +73,7 @@ function StepIndicator({ current, total }: { current: Step; total: number }) {
 
 // ── Step 1: 기본 설정 ────────────────────────────────
 
-function Step1({ data, onChange }: { data: FormData; onChange: (k: keyof FormData, v: string) => void }) {
+function Step1({ data, onChange, isDocker }: { data: FormData; onChange: (k: keyof FormData, v: string) => void; isDocker?: boolean }) {
     const qualities = ["best", "1080p", "720p", "480p"];
     const formats = ["ts", "mp4", "mkv"];
 
@@ -87,9 +88,18 @@ function Step1({ data, onChange }: { data: FormData; onChange: (k: keyof FormDat
                 <DirInput
                     value={data.download_dir}
                     onChange={(val) => onChange("download_dir", val)}
-                    placeholder="예: C:\Recordings 또는 /home/user/recordings"
+                    placeholder={isDocker ? "Docker 매핑 폴더 (예: /app/recordings)" : "예: C:\\Recordings 또는 /home/user/recordings"}
                 />
-                <p className="text-xs text-zinc-500 mt-1.5">경로가 없으면 자동으로 생성됩니다.</p>
+                <p className="text-xs text-zinc-500 mt-1.5 flex items-start gap-1">
+                    {isDocker ? (
+                        <>
+                            <span className="text-[#00FFA3]">💡</span>
+                            <span>Docker 환경에서는 기본 매핑 폴더인 <b>/app/recordings</b> 사용을 권장합니다.</span>
+                        </>
+                    ) : (
+                        "경로가 없으면 자동으로 생성됩니다."
+                    )}
+                </p>
             </div>
 
             {/* 녹화 품질 */}
@@ -235,12 +245,12 @@ function Step3({ data }: { data: FormData }) {
 
 // ── Main SetupWizard ─────────────────────────────────
 
-export function SetupWizard({ onComplete }: SetupWizardProps) {
+export function SetupWizard({ onComplete, isDocker = false }: SetupWizardProps) {
     const [step, setStep] = useState<Step>(1);
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [data, setData] = useState<FormData>({
-        download_dir: "",
+        download_dir: isDocker ? "/app/recordings" : "",
         output_format: "ts",
         recording_quality: "best",
         nid_aut: "",

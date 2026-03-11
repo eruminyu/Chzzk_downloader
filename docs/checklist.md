@@ -362,3 +362,16 @@
 ### 수정 내용
 - [x] `Dockerfile`: `USER appuser` 관련 3줄 제거 (root 실행, self-hosted 앱 표준 패턴)
 - [x] `docker-compose.yml`: `TZ=Asia/Seoul` 환경변수 추가
+
+## 2026-03-12: Docker 환경 다운로드 경로 오기입 방지 개선
+
+### 원인
+- Docker 사용자가 초기 설정에서 호스트 OS의 경로(`C:\Recordings` 등)를 다운로드 경로로 입력할 위험 존재
+- 입력 시 컨테이너 내부에 임의의 격리된 폴더가 생성되어 다운로드는 되나 호스트로 매핑되지 않아 파일이 유실되는(안 보이는) 문제 발생
+- 기존 `download_dir`의 입력 placeholder가 항상 호스트 OS의 경로를 예시로 보여주고 있었음
+
+### 수정 내용
+- [x] `backend/app/api/setup.py`: `/setup/status` API가 현재 Docker 구동 여부(`is_docker`)를 감지하여 반환하도록 기능 추가
+- [x] `frontend/src/App.tsx`: `/setup/status` 응답의 `is_docker` 값을 `SetupWizard`에 전달
+- [x] `frontend/src/components/SetupWizard.tsx`: `isDocker` 여부에 따라 다운로드 경로 입력란의 **초기값(`/app/recordings`)**, **Placeholder**, **안내 문구**를 동적으로 변경하여 기본 매핑 폴더 사용을 유도
+- [x] 프론트엔드 TypeScript 빌드 검증 통과

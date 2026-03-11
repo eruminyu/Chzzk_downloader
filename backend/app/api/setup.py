@@ -54,7 +54,10 @@ class SetupCompleteRequest(BaseModel):
 @router.get("/status", summary="초기 설정 완료 여부 확인")
 async def get_setup_status():
     """초기 설정이 필요한지 반환한다."""
-    return {"needs_setup": not is_setup_complete()}
+    return {
+        "needs_setup": not is_setup_complete(),
+        "is_docker": Path("/.dockerenv").exists(),
+    }
 
 
 @router.post("/complete", summary="초기 설정 완료 처리")
