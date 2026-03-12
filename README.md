@@ -2,11 +2,19 @@
 
 ![Python](https://img.shields.io/badge/Python-3.12+-blue.svg)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.109+-009688.svg)
-![React](https://img.shields.io/badge/React-18-61DAFB.svg)
+![React](https://img.shields.io/badge/React-19-61DAFB.svg)
 ![License](https://img.shields.io/badge/License-MIT-green.svg)
 
 **Chzzk-Recorder-Pro**는 네이버 치지직(Chzzk) 라이브 스트리밍 녹화 및 VOD 다운로드를 위한 강력한 올인원 솔루션입니다.
 안정적인 녹화 파이프라인, 직관적인 웹 대시보드, 그리고 실시간 채팅 아카이빙 기능을 제공합니다.
+
+---
+
+## 📸 미리보기
+
+| 대시보드 | VOD 다운로드 |
+|:---:|:---:|
+| ![대시보드](assets/screenshots/dashboard.png) | ![VOD 다운로드](assets/screenshots/vod-download.png) |
 
 ---
 
@@ -29,6 +37,19 @@
 ### 📊 통계 및 알림
 - **대시보드**: 총 녹화 시간, 용량, 채널별 통계를 시각적으로 확인합니다.
 - **Discord 알림**: 녹화 시작/종료, 다운로드 완료 시 디스코드 봇을 통해 알림을 받습니다.
+
+---
+
+## 💻 시스템 요구사항
+
+| 항목 | 최소 사양 | 권장 사양 |
+|------|-----------|-----------|
+| OS | Windows 10+, Ubuntu 20.04+, macOS 12+ | 최신 버전 |
+| RAM | 2GB | 4GB 이상 |
+| 디스크 | 500MB (앱) + 녹화 용량 | SSD 권장 |
+| FFmpeg | 필수 (Windows: 자동 설치 지원) | 최신 stable |
+| Python | 3.10+ (.exe 사용 시 불필요) | 3.12 |
+| Node.js | 18+ (개발자용만 필요) | 20+ |
 
 ---
 
@@ -149,6 +170,66 @@ cd backend && python run.py
 2. 봇 토큰(Token)을 복사합니다.
 3. 봇을 서버에 초대하고, 알림을 받을 채널 ID를 복사합니다. (디스코드 개발자 모드 켜기 필요)
 4. 설정 페이지의 Discord 섹션에 토큰과 채널 ID를 입력합니다.
+
+---
+
+## 🔄 업데이트 방법
+
+### 🪟 Windows
+[Releases 페이지](https://github.com/eruminyu/Chzzk_downloader/releases)에서 새 버전의 exe를 다운로드하여 기존 파일에 덮어쓰기하세요.
+설정(`.env`)과 녹화 파일은 그대로 유지됩니다.
+
+### 🐧 Linux Native
+설치 스크립트를 다시 실행하면 자동으로 `git pull` + 재빌드됩니다.
+```bash
+curl -fsSL https://raw.githubusercontent.com/eruminyu/Chzzk_downloader/main/scripts/install.sh | bash
+```
+
+### 🐳 Docker
+```bash
+cd ~/chzzk-recorder-pro
+docker compose pull
+docker compose up -d --build
+```
+
+---
+
+## ❓ 자주 묻는 질문 (FAQ)
+
+<details>
+<summary><b>Windows Defender가 exe를 차단해요</b></summary>
+
+서명되지 않은 exe 파일에서 흔히 발생하는 현상입니다. **"추가 정보" → "실행"** 을 눌러 허용하세요.
+소스 코드는 100% 공개되어 있으므로 직접 확인할 수 있습니다.
+</details>
+
+<details>
+<summary><b>FFmpeg가 설치되어 있지 않다고 나와요</b></summary>
+
+- **Windows exe**: 첫 실행 시 FFmpeg 자동 다운로드를 안내합니다. 안내에 따라 진행하세요.
+- **Linux Native**: `install.sh`가 자동으로 설치합니다.
+- **수동 설치**: [FFmpeg 공식 사이트](https://ffmpeg.org/download.html)에서 다운로드 후, 시스템 PATH에 추가하거나 `.env`에서 `FFMPEG_PATH`를 설정하세요.
+</details>
+
+<details>
+<summary><b>포트 8000이 이미 사용 중이에요</b></summary>
+
+`.env` 파일에서 포트를 변경하세요:
+```
+PORT=8001
+```
+</details>
+
+<details>
+<summary><b>성인 방송이 녹화되지 않아요</b></summary>
+
+네이버 로그인 쿠키가 필요합니다:
+1. 브라우저에서 네이버 로그인 → 개발자 도구(F12) → Application → Cookies
+2. `NID_AUT`와 `NID_SES` 값을 복사
+3. 설정 페이지에서 입력
+
+> 쿠키는 주기적으로 만료됩니다. 녹화가 안 될 때는 쿠키를 갱신해 주세요.
+</details>
 
 ---
 

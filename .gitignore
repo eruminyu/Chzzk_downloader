@@ -66,3 +66,9 @@ backend/test_recordings/
 # Test cache
 .pytest_cache/
 backend/.pytest_cache/
+
+# 개발용 임시 스크립트 (디버그/수동 테스트)
+scripts/debug_*.py
+scripts/test_*.py
+scripts/verify_*.py
+scripts/generate_icon.py

@@ -13,7 +13,7 @@
 
 ---
 
-## [1.0.0] - 미정
+## [1.0.0] - 2026-03-12
 
 ### Added
 - **채널 모니터링**: 치지직 채널 자동 감시 및 방송 시작 시 녹화 자동 시작
@@ -39,5 +39,5 @@
 
 ---
 
-[Unreleased]: https://github.com/your-username/Chzzk_downloader/compare/v1.0.0...HEAD
-[1.0.0]: https://github.com/your-username/Chzzk_downloader/releases/tag/v1.0.0
+[Unreleased]: https://github.com/eruminyu/Chzzk_downloader/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/eruminyu/Chzzk_downloader/releases/tag/v1.0.0

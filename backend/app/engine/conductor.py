@@ -241,6 +241,26 @@ class Conductor:
                     await self._stop_recording(channel_id)
                     retry_count = 0
 
+                # ── 채팅 아카이빙 동적 시작 (녹화 중 설정이 켜진 경우) ──
+                elif status["is_live"] and task.pipeline is not None \
+                        and task.pipeline.state == RecordingState.RECORDING \
+                        and task.chat_archiver is None \
+                        and get_settings().chat_archive_enabled:
+                    try:
+                        output_file = task.pipeline.get_status().get("output_path")
+                        if output_file:
+                            chat_file = Path(output_file).with_suffix(".jsonl")
+                            archiver = ChatArchiver(
+                                channel_id=channel_id,
+                                output_path=chat_file,
+                                auth=self._auth,
+                            )
+                            await archiver.start()
+                            task.chat_archiver = archiver
+                            logger.info(f"[{channel_id}] 채팅 아카이빙 동적 시작: {chat_file}")
+                    except Exception as e:
+                        logger.error(f"[{channel_id}] 채팅 아카이빙 동적 시작 실패: {e}")
+
                 # ── 녹화 오류 시 자동 재시작 ──
                 elif status["is_live"] and task.auto_record:
                     pipe = task.pipeline

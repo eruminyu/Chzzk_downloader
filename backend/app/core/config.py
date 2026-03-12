@@ -53,7 +53,7 @@ class Settings(BaseSettings):
     debug: bool = False
 
     # ── FFmpeg ───────────────────────────────────────────
-    ffmpeg_path: str = "C:\\ffmpeg\\bin\\ffmpeg.exe"
+    ffmpeg_path: str = "ffmpeg"
 
     # ── 저장 경로 ────────────────────────────────────────
     download_dir: str = "./recordings"
@@ -90,7 +90,7 @@ class Settings(BaseSettings):
     vod_max_speed: int = 0             # 최대 다운로드 속도 (MB/s, 0 = 무제한)
 
     # ── 채팅 아카이빙 ────────────────────────────────────
-    chat_archive_enabled: bool = False  # 녹화 시 채팅 자동 아카이빙 여부
+    chat_archive_enabled: bool = True   # 녹화 시 채팅 자동 아카이빙 여부
 
     def resolve_ffmpeg_path(self) -> str:
         """FFmpeg 실행 파일 경로를 탐색 순서에 따라 결정한다.
