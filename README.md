@@ -73,6 +73,12 @@ curl -fsSL https://raw.githubusercontent.com/eruminyu/Chzzk_downloader/main/scri
 - 프론트엔드 빌드 (React → 정적 파일)
 - Python 가상환경 생성 및 의존성 설치
 - systemd 서비스 등록 (부팅 시 자동 실행, 선택)
+- 설치 완료 후 서버 자동 시작
+
+> 💡 **서버가 시작되지 않거나 이후 재실행할 때:**
+> ```bash
+> ~/chzzk-recorder-pro/start.sh
+> ```
 
 > 📖 상세 가이드: [Linux 설치 가이드](./docs/linux-guide.md)
 
