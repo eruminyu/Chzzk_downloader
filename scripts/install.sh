@@ -247,6 +247,9 @@ EOF
   info "실행 스크립트 생성 완료: $LAUNCHER ✓"
 }
 
+# systemd 서비스 등록 여부 (자동 실행 스킵 판단용)
+SERVICE_REGISTERED=false
+
 # ── 7. systemd 서비스 설치 (선택) ────────────────────────────
 install_service() {
   if ! command -v systemctl &>/dev/null; then
@@ -282,6 +285,7 @@ EOF
     sudo systemctl daemon-reload
     sudo systemctl enable chzzk-recorder
     sudo systemctl start chzzk-recorder
+    SERVICE_REGISTERED=true
     info "systemd 서비스 등록 및 시작 완료 ✓"
     info "서비스 상태: sudo systemctl status chzzk-recorder"
   else
@@ -335,10 +339,14 @@ main() {
   install_service
   print_done
 
-  # 설치 완료 후 서버 자동 시작
-  step "서버 시작"
-  info "Chzzk Recorder Pro 를 시작합니다..."
-  exec "$INSTALL_DIR/start.sh"
+  # systemd 서비스로 이미 시작된 경우 중복 실행 방지
+  if [ "$SERVICE_REGISTERED" = "true" ]; then
+    info "systemd 서비스로 실행 중입니다. 별도 실행을 건너뜁니다."
+  else
+    step "서버 시작"
+    info "Chzzk Recorder Pro 를 시작합니다..."
+    exec "$INSTALL_DIR/start.sh"
+  fi
 }
 
 main "$@"

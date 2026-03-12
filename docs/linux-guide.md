@@ -154,6 +154,34 @@ sudo firewall-cmd --reload
 
 ---
 
+## 🔄 재설치 / 완전 초기화
+
+재설치 전에 반드시 기존 서비스를 먼저 정리하세요.
+**정리하지 않으면 포트 충돌로 서버가 시작되지 않습니다.**
+
+```bash
+# 1. systemd 서비스 중지 및 제거
+sudo systemctl stop chzzk-recorder
+sudo systemctl disable chzzk-recorder
+sudo rm -f /etc/systemd/system/chzzk-recorder.service
+sudo systemctl daemon-reload
+
+# 2. 설치 디렉토리 삭제
+rm -rf ~/chzzk-recorder-pro
+
+# 3. 재설치
+curl -fsSL https://raw.githubusercontent.com/eruminyu/Chzzk_downloader/main/scripts/install.sh | bash
+```
+
+> ⚠️ **포트가 이미 사용 중이라는 오류가 나는 경우**
+> systemd 서비스가 이미 8000 포트를 점유하고 있는 상태입니다.
+> 위의 1번 단계(서비스 중지)만 실행 후 재시도하세요.
+> ```bash
+> sudo systemctl stop chzzk-recorder
+> ```
+
+---
+
 ## 🛠️ 트러블슈팅
 
 | 증상 | 해결 |
@@ -161,5 +189,6 @@ sudo firewall-cmd --reload
 | `python3.12` 없음 | `sudo add-apt-repository ppa:deadsnakes/ppa && sudo apt install python3.12` |
 | `ffmpeg` 명령 없음 | `sudo apt install ffmpeg` |
 | 포트 접속 불가 | 방화벽 확인, `sudo ufw allow 8000/tcp` |
+| `address already in use` 오류 | `sudo systemctl stop chzzk-recorder` 후 재실행 |
 | Permission denied | `chown -R $USER:$USER ./recordings ./data ./logs` |
 | Docker 그룹 권한 오류 | 로그아웃 후 재로그인 (또는 `newgrp docker`) |
