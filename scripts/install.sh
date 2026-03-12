@@ -255,14 +255,8 @@ install_service() {
   fi
 
   echo ""
-  # curl | bash 파이프 환경에서는 stdin이 없으므로 서비스 등록 스킵
-  if ! [ -t 0 ]; then
-    warn "파이프 실행 감지 — systemd 서비스 등록을 건너뜁니다."
-    warn "서비스 등록은 설치 후 'bash $INSTALL_DIR/scripts/install.sh' 를 다시 실행하세요."
-    return 0
-  fi
-
-  read -rp "$(echo -e "${YELLOW}[?]${NC} systemd 서비스로 등록하시겠습니까? (부팅 시 자동 실행) [y/N]: ")" REPLY
+  # curl | bash 파이프 환경에서는 stdin을 /dev/tty로 강제 연결
+  read -rp "$(echo -e "${YELLOW}[?]${NC} systemd 서비스로 등록하시겠습니까? (부팅 시 자동 실행) [y/N]: ")" REPLY </dev/tty
   if [[ "$REPLY" =~ ^[Yy]$ ]]; then
     SERVICE_FILE="/etc/systemd/system/chzzk-recorder.service"
     sudo tee "$SERVICE_FILE" > /dev/null <<EOF
