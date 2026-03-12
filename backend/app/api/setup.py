@@ -88,8 +88,8 @@ async def complete_setup(req: SetupCompleteRequest):
         "RECORDING_QUALITY": quality,
     }
     if req.nid_aut and req.nid_ses:
-        env_updates["NID_AUT"] = req.nid_aut
-        env_updates["NID_SES"] = req.nid_ses
+        env_updates["NID_AUT"] = str(req.nid_aut)
+        env_updates["NID_SES"] = str(req.nid_ses)
 
     _update_env_file(env_updates)
 

@@ -16,9 +16,10 @@ services:
       # (호스트에 .env가 없으면 Docker가 빈 디렉토리를 만드는데, entrypoint에서 정리함)
       - ./.env:/app/.env
       # 영속성이 필요한 데이터 마운트
-      - ./recordings:/app/recordings # 녹화 파일
-      - ./data:/app/data # channels.json 등 설정 파일
-      - ./logs:/app/logs # 애플리케이션 로그
+      # WORKDIR=/app/backend 기준 상대 경로이므로 /app/backend 하위에 마운트
+      - ./recordings:/app/backend/recordings # 녹화 파일
+      - ./data:/app/backend/data # channels.json, vod_history.json 등 설정 파일
+      - ./logs:/app/backend/logs # 애플리케이션 로그
     # 디렉토리로 잘못 마운트된 경우 빈 파일로 교체 후 서버 시작
     entrypoint: [ "/bin/sh", "-c", "[ -d /app/.env ] && rm -rf /app/.env && touch /app/.env; python -m uvicorn app.main:app --host 0.0.0.0 --port 8000" ]
     healthcheck:
