@@ -300,7 +300,11 @@ print_done() {
   echo -e "    ${CYAN}$INSTALL_DIR/start.sh${NC}"
   echo ""
   echo -e "  ${BOLD}▶ 접속 주소:${NC}"
-  echo -e "    ${CYAN}http://localhost:8000${NC}"
+  echo -e "    ${CYAN}http://localhost:8000${NC}  (로컬)"
+  LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+  if [ -n "$LOCAL_IP" ]; then
+    echo -e "    ${CYAN}http://$LOCAL_IP:8000${NC}  (원격)"
+  fi
   echo ""
   echo -e "  ${BOLD}▶ 서비스 관리 (설치한 경우):${NC}"
   echo -e "    sudo systemctl status chzzk-recorder"
