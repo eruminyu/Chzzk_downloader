@@ -61,7 +61,7 @@
 |------|------|--------|
 | 🪟 Windows | `.exe` 실행 파일 | ⭐ 가장 쉬움 |
 | 🐧 Linux / macOS | 원라이너 스크립트 (Native) | ⭐ 가장 쉬움 |
-| 🐳 Linux / macOS | 원라이너 스크립트 (Docker) | ⚠️ 현재 버그 수정 중 |
+| 🐳 Linux / macOS | 원라이너 스크립트 (Docker) | ⭐ 가장 쉬움 |
 | ⚙️ 모든 OS | 직접 실행 (개발자용) | 🔧 고급 |
 
 ---
@@ -107,8 +107,6 @@ curl -fsSL https://raw.githubusercontent.com/eruminyu/Chzzk_downloader/main/scri
 
 ### 🐳 Linux / macOS — 원라이너 (Docker)
 
-> ⚠️ **현재 Docker 환경에서 파일 저장 경로 관련 버그를 수정 중입니다. 안정적인 사용을 위해 Native 설치를 권장합니다.**
-
 Docker가 없는 서버에서도 OK. Docker Engine 설치까지 포함합니다.
 
 ```bash
@@ -120,6 +118,15 @@ curl -fsSL https://raw.githubusercontent.com/eruminyu/Chzzk_downloader/main/scri
 - Docker Compose 플러그인 자동 설치
 - 저장소 클론 → 이미지 빌드 → 백그라운드 실행
 - 헬스체크로 정상 시작 확인
+
+**녹화 파일 저장 위치 변경:**
+`docker-compose.yml`의 볼륨 설정에서 호스트 경로를 원하는 경로로 변경하세요:
+```yaml
+volumes:
+  - /your/path/recordings:/app/backend/recordings  # 녹화 파일 저장 위치
+  - /your/path/data:/app/backend/data
+  - /your/path/logs:/app/backend/logs
+```
 
 > 📖 상세 가이드: [Docker 가이드](./docs/docker-guide.md)
 
@@ -194,7 +201,7 @@ curl -fsSL https://raw.githubusercontent.com/eruminyu/Chzzk_downloader/main/scri
 ### 🐳 Docker
 ```bash
 cd ~/chzzk-recorder-pro
-docker compose pull
+git pull
 docker compose up -d --build
 ```
 
