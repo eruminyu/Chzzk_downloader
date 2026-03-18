@@ -77,13 +77,17 @@ async def complete_setup(req: SetupCompleteRequest):
     if quality not in VALID_QUALITIES:
         raise HTTPException(status_code=400, detail=f"지원하지 않는 품질: {quality}")
 
+    # 도커 환경에서는 저장 경로를 볼륨 마운트 경로로 고정
+    is_docker = Path("/.dockerenv").exists()
+    download_dir = "/app/backend/recordings" if is_docker else req.download_dir
+
     # 저장 경로 생성
-    save_dir = Path(req.download_dir)
+    save_dir = Path(download_dir)
     save_dir.mkdir(parents=True, exist_ok=True)
 
     # .env 파일에 설정 저장 (이 파일이 생성되면 곧 초기설정 완료를 의미)
     env_updates: dict[str, str] = {
-        "DOWNLOAD_DIR": req.download_dir,
+        "DOWNLOAD_DIR": download_dir,
         "OUTPUT_FORMAT": fmt,
         "RECORDING_QUALITY": quality,
     }
@@ -95,7 +99,7 @@ async def complete_setup(req: SetupCompleteRequest):
 
     # in-memory 설정 즉시 반영
     settings = get_settings()
-    settings.download_dir = req.download_dir
+    settings.download_dir = download_dir
     settings.output_format = fmt
     settings.recording_quality = quality
     if req.nid_aut and req.nid_ses:

@@ -67,6 +67,7 @@ function ToggleSwitch({
 
 export default function Settings() {
     const [settings, setSettings] = useState<SettingsType | null>(null);
+    const [isDocker, setIsDocker] = useState(false);
     const toast = useToast();
 
     // ── Auth state ──
@@ -111,6 +112,10 @@ export default function Settings() {
 
     useEffect(() => {
         loadSettings();
+        fetch("/api/setup/status")
+            .then((r) => r.json())
+            .then((data) => setIsDocker(data.is_docker))
+            .catch(() => {});
     }, []);
 
     const loadSettings = async () => {
@@ -279,13 +284,26 @@ export default function Settings() {
                                 <FolderOpen className="w-4 h-4" />
                                 저장 경로
                             </label>
-                            <DirInput
-                                value={downloadDir}
-                                onChange={setDownloadDir}
-                                placeholder="예: E:\recordings"
-                            />
+                            {isDocker ? (
+                                <div className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-4 py-2.5 text-sm text-zinc-500 font-mono cursor-not-allowed select-none">
+                                    {downloadDir}
+                                </div>
+                            ) : (
+                                <DirInput
+                                    value={downloadDir}
+                                    onChange={setDownloadDir}
+                                    placeholder="예: E:\recordings"
+                                />
+                            )}
                             <p className="text-xs text-zinc-500">
-                                라이브 녹화 + 채팅 로그가 저장되는 기본 경로입니다.
+                                {isDocker ? (
+                                    <span className="flex items-start gap-1">
+                                        <span className="text-yellow-400">⚠️</span>
+                                        Docker 환경에서는 <b className="text-zinc-300">docker-compose.yml</b> 볼륨 설정으로 경로를 변경하세요. (<span className="font-mono">/your/path:/app/backend/recordings</span>)
+                                    </span>
+                                ) : (
+                                    "라이브 녹화 + 채팅 로그가 저장되는 기본 경로입니다."
+                                )}
                             </p>
                         </div>
 
@@ -313,11 +331,17 @@ export default function Settings() {
                                             <Folder className="w-3.5 h-3.5" />
                                             치지직 VOD / 클립 저장 경로
                                         </label>
-                                        <DirInput
-                                            value={vodChzzkDir}
-                                            onChange={setVodChzzkDir}
-                                            placeholder="비어있으면 기본 저장 경로 사용"
-                                        />
+                                        {isDocker ? (
+                                            <div className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-4 py-2.5 text-sm text-zinc-500 font-mono cursor-not-allowed select-none">
+                                                {vodChzzkDir || "기본 저장 경로 사용"}
+                                            </div>
+                                        ) : (
+                                            <DirInput
+                                                value={vodChzzkDir}
+                                                onChange={setVodChzzkDir}
+                                                placeholder="비어있으면 기본 저장 경로 사용"
+                                            />
+                                        )}
                                         <p className="text-xs text-zinc-600">
                                             chzzk.naver.com URL 다운로드에 적용됩니다.
                                         </p>
@@ -329,11 +353,17 @@ export default function Settings() {
                                             <Folder className="w-3.5 h-3.5" />
                                             외부 다운로드 저장 경로 (유튜브 등)
                                         </label>
-                                        <DirInput
-                                            value={vodExternalDir}
-                                            onChange={setVodExternalDir}
-                                            placeholder="비어있으면 기본 저장 경로 사용"
-                                        />
+                                        {isDocker ? (
+                                            <div className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-4 py-2.5 text-sm text-zinc-500 font-mono cursor-not-allowed select-none">
+                                                {vodExternalDir || "기본 저장 경로 사용"}
+                                            </div>
+                                        ) : (
+                                            <DirInput
+                                                value={vodExternalDir}
+                                                onChange={setVodExternalDir}
+                                                placeholder="비어있으면 기본 저장 경로 사용"
+                                            />
+                                        )}
                                         <p className="text-xs text-zinc-600">
                                             유튜브 등 외부 URL(yt-dlp) 다운로드에 적용됩니다.
                                         </p>

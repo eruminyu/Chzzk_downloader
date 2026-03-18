@@ -85,16 +85,23 @@ function Step1({ data, onChange, isDocker }: { data: FormData; onChange: (k: key
                     <FolderOpen className="inline w-4 h-4 mr-1 text-[#00FFA3]" />
                     녹화 저장 경로 <span className="text-red-400">*</span>
                 </label>
-                <DirInput
-                    value={data.download_dir}
-                    onChange={(val) => onChange("download_dir", val)}
-                    placeholder={isDocker ? "Docker 매핑 폴더 (예: /app/recordings)" : "예: C:\\Recordings 또는 /home/user/recordings"}
-                />
+                {isDocker ? (
+                    <div className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-4 py-2.5 text-sm text-zinc-500 font-mono cursor-not-allowed select-none">
+                        /app/backend/recordings
+                    </div>
+                ) : (
+                    <DirInput
+                        value={data.download_dir}
+                        onChange={(val) => onChange("download_dir", val)}
+                        placeholder="예: C:\Recordings 또는 /home/user/recordings"
+                    />
+                )}
                 <p className="text-xs text-zinc-500 mt-1.5 flex items-start gap-1">
                     {isDocker ? (
                         <>
-                            <span className="text-[#00FFA3]">💡</span>
-                            <span>Docker 환경에서는 기본 매핑 폴더인 <b>/app/recordings</b> 사용을 권장합니다.</span>
+                            <span className="text-yellow-400">⚠️</span>
+                            <span>Docker 환경에서는 저장 경로를 <b className="text-zinc-300">docker-compose.yml</b>의 볼륨 설정으로 지정하세요.<br />
+                            <span className="font-mono text-zinc-400">- /your/path:/app/backend/recordings</span></span>
                         </>
                     ) : (
                         "경로가 없으면 자동으로 생성됩니다."
@@ -260,7 +267,7 @@ export function SetupWizard({ onComplete, isDocker = false }: SetupWizardProps) 
     const onChange = (k: keyof FormData, v: string) =>
         setData((prev) => ({ ...prev, [k]: v }));
 
-    const canNext = step === 1 ? data.download_dir.trim().length > 0 : true;
+    const canNext = step === 1 ? (isDocker || data.download_dir.trim().length > 0) : true;
 
     const handleNext = () => {
         if (step < 3) setStep((s) => (s + 1) as Step);

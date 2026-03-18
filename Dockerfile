@@ -34,8 +34,8 @@ COPY backend/ ./backend/
 # FastAPI가 서빙하는 경로: backend/app/static
 COPY --from=frontend-builder /app/frontend/dist ./backend/app/static
 
-# 데이터 디렉토리 생성
-RUN mkdir -p /app/recordings /app/data /app/logs
+# 데이터 디렉토리 생성 (WORKDIR=/app/backend 기준 상대 경로와 일치)
+RUN mkdir -p /app/backend/recordings /app/backend/data /app/backend/logs
 
 EXPOSE 8000
 
