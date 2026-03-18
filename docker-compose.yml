@@ -12,16 +12,16 @@ services:
       - FFMPEG_PATH=ffmpeg
       - TZ=Asia/Seoul
     volumes:
-      # .env: 초기설정 마법사 완료 시 생성, 재시작해도 설정 유지
-      # (호스트에 .env가 없으면 Docker가 빈 디렉토리를 만드는데, entrypoint에서 정리함)
-      - ./.env:/app/.env
+      # .env: 상위 디렉토리를 마운트해서 도커가 .env를 디렉토리로 만드는 문제 방지
+      # 호스트의 config/ 디렉토리 → 컨테이너의 /app/config/ 로 마운트
+      - ./config:/app/config
       # 영속성이 필요한 데이터 마운트
       # WORKDIR=/app/backend 기준 상대 경로이므로 /app/backend 하위에 마운트
       - ./recordings:/app/backend/recordings # 녹화 파일
       - ./data:/app/backend/data # channels.json, vod_history.json 등 설정 파일
       - ./logs:/app/backend/logs # 애플리케이션 로그
-    # 디렉토리로 잘못 마운트된 경우 빈 파일로 교체 후 서버 시작
-    entrypoint: [ "/bin/sh", "-c", "[ -d /app/.env ] && rm -rf /app/.env && touch /app/.env; python -m uvicorn app.main:app --host 0.0.0.0 --port 8000" ]
+    # config/.env 를 /app/.env 로 심볼릭 링크 후 서버 시작
+    entrypoint: [ "/bin/sh", "-c", "mkdir -p /app/config && [ ! -f /app/config/.env ] && touch /app/config/.env; ln -sf /app/config/.env /app/.env; python -m uvicorn app.main:app --host 0.0.0.0 --port 8000" ]
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
       interval: 30s
