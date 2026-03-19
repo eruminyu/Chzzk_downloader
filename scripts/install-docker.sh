@@ -162,9 +162,7 @@ clone_repo() {
 # ── 5. 데이터 디렉토리 생성 ──────────────────────────────────
 setup_dirs() {
   step "데이터 디렉토리 생성"
-  mkdir -p "$INSTALL_DIR/recordings" "$INSTALL_DIR/data" "$INSTALL_DIR/logs"
-  # .env 파일이 없으면 빈 파일 생성 (Docker 볼륨 마운트 오류 방지)
-  touch "$INSTALL_DIR/.env"
+  mkdir -p "$INSTALL_DIR/recordings" "$INSTALL_DIR/data" "$INSTALL_DIR/logs" "$INSTALL_DIR/config"
   info "디렉토리 생성 완료 ✓"
 }
 

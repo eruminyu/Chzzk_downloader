@@ -106,5 +106,14 @@ async def complete_setup(req: SetupCompleteRequest):
         settings.nid_aut = req.nid_aut
         settings.nid_ses = req.nid_ses
 
+    # RecorderService의 AuthManager 인스턴스도 즉시 업데이트
+    if req.nid_aut and req.nid_ses:
+        try:
+            from app.main import get_recorder_service
+            service = get_recorder_service()
+            service.update_cookies(req.nid_aut, req.nid_ses)
+        except Exception:
+            pass  # 서비스 미초기화 상태면 무시 (Settings에 이미 반영됨)
+
     logger.info(f"✅ 초기 설정 완료. .env 생성됨: {_get_env_path()}")
     return {"success": True, "message": "초기 설정이 완료되었습니다."}

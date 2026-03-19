@@ -193,16 +193,13 @@ cd backend && python run.py
 설정(`.env`)과 녹화 파일은 그대로 유지됩니다.
 
 ### 🐧 Linux Native
-설치 스크립트를 다시 실행하면 자동으로 `git pull` + 재빌드됩니다.
 ```bash
-curl -fsSL https://raw.githubusercontent.com/eruminyu/Chzzk_downloader/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/eruminyu/Chzzk_downloader/main/scripts/update.sh | bash
 ```
 
 ### 🐳 Docker
 ```bash
-cd ~/chzzk-recorder-pro
-git pull
-docker compose up -d --build
+curl -fsSL https://raw.githubusercontent.com/eruminyu/Chzzk_downloader/main/scripts/update-docker.sh | bash
 ```
 
 ---

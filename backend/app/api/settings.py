@@ -271,10 +271,13 @@ async def test_cookies():
             data = resp.json()
 
         if data.get("code") == 200:
+            content = data.get("content") or {}
+            from app.core.logger import logger as _logger
+            _logger.debug(f"getUserStatus content keys: {list(content.keys()) if content else 'empty'}")
             return {
                 "valid": True,
                 "message": "쿠키 검증 성공! 로그인 상태가 확인되었습니다.",
-                "user_status": data.get("content", {}),
+                "user_status": content,
             }
         else:
             return {

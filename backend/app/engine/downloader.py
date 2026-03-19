@@ -62,9 +62,9 @@ class StreamLinkEngine:
             resp.raise_for_status()
             data = resp.json()
 
-        content = data.get("content", {})
+        content = data.get("content") or {}
         status = content.get("status", "CLOSE")
-        channel = content.get("channel", {})
+        channel = content.get("channel") or {}
 
         # 실시간 썸네일 URL에서 {type} 플레이스홀더 치환
         raw_thumbnail = content.get("liveImageUrl", "")
