@@ -92,6 +92,14 @@ class Settings(BaseSettings):
     # ── 채팅 아카이빙 ────────────────────────────────────
     chat_archive_enabled: bool = True   # 녹화 시 채팅 자동 아카이빙 여부
 
+    # ── TwitCasting 인증 ──────────────────────────────────
+    twitcasting_client_id: Optional[str] = None
+    twitcasting_client_secret: Optional[str] = None
+
+    # ── Twitter Spaces 인증 ──────────────────────────────
+    twitter_bearer_token: Optional[str] = None
+    twitter_cookie_file: Optional[str] = None  # Netscape 형식 쿠키 파일 경로
+
     def resolve_ffmpeg_path(self) -> str:
         """FFmpeg 실행 파일 경로를 탐색 순서에 따라 결정한다.
 

@@ -10,6 +10,7 @@ from typing import Optional
 
 from app.core.logger import logger
 from app.engine.auth import AuthManager
+from app.engine.base import Platform
 from app.engine.conductor import Conductor
 from app.engine.vod import VodEngine
 
@@ -34,32 +35,53 @@ class RecorderService:
     # ── 채널 관리 ────────────────────────────────────────
 
     def add_channel(self, channel_id: str, auto_record: bool = True) -> dict:
-        """감시 채널을 추가한다."""
-        self._conductor.add_channel(channel_id, auto_record=auto_record)
+        """Chzzk 감시 채널을 추가한다 (하위 호환용)."""
+        return self.add_platform_channel(
+            channel_id=channel_id,
+            platform=Platform.CHZZK,
+            auto_record=auto_record,
+        )
+
+    def add_platform_channel(
+        self,
+        channel_id: str,
+        platform: Platform = Platform.CHZZK,
+        auto_record: bool = True,
+    ) -> dict:
+        """멀티 플랫폼 감시 채널을 추가한다."""
+        self._conductor.add_channel(channel_id, auto_record=auto_record, platform=platform)
+        composite_key = self._conductor.make_composite_key(platform, channel_id)
         return {
+            "composite_key": composite_key,
+            "platform": platform.value,
             "channel_id": channel_id,
             "auto_record": auto_record,
-            "message": f"채널 '{channel_id}' 등록 완료.",
+            "message": f"채널 '{composite_key}' 등록 완료.",
         }
 
     async def remove_channel(self, channel_id: str) -> dict:
-        """감시 채널을 제거한다."""
-        await self._conductor.remove_channel(channel_id)
+        """Chzzk 감시 채널을 제거한다 (하위 호환용)."""
+        composite_key = self._conductor.make_composite_key(Platform.CHZZK, channel_id)
+        return await self.remove_platform_channel(composite_key)
+
+    async def remove_platform_channel(self, composite_key: str) -> dict:
+        """플랫폼 채널을 감시 목록에서 제거한다."""
+        await self._conductor.remove_channel(composite_key)
         return {
-            "channel_id": channel_id,
-            "message": f"채널 '{channel_id}' 제거 완료.",
+            "composite_key": composite_key,
+            "message": f"채널 '{composite_key}' 제거 완료.",
         }
 
     def get_channels(self) -> list[dict]:
         """모든 채널 상태를 반환한다."""
         return self._conductor.get_all_status()
 
-    def toggle_auto_record(self, channel_id: str) -> dict:
+    def toggle_auto_record(self, composite_key: str) -> dict:
         """채널의 자동 녹화 설정을 토글한다."""
-        new_value = self._conductor.toggle_auto_record(channel_id)
-        logger.info(f"[Service] 자동 녹화 토글: {channel_id} → {'ON' if new_value else 'OFF'}")
+        new_value = self._conductor.toggle_auto_record(composite_key)
+        logger.info(f"[Service] 자동 녹화 토글: {composite_key} → {'ON' if new_value else 'OFF'}")
         return {
-            "channel_id": channel_id,
+            "composite_key": composite_key,
             "auto_record": new_value,
             "message": f"자동 녹화 {'ON' if new_value else 'OFF'}",
         }

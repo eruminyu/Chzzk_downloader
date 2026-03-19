@@ -21,15 +21,13 @@ import {
     ArrowLeft,
     ChevronRight,
     X,
+    Info,
 } from "lucide-react";
 import { api, Settings as SettingsType, BrowseDirsResponse, DirEntry } from "../api/client";
 import { useToast } from "../components/ui/Toast";
 import { getErrorMessage } from "../utils/error";
 import { DirInput } from "../components/ui/DirInput";
 import { useTheme, THEMES, ThemeId } from "../context/ThemeContext";
-
-// ── ToggleSwitch ─────────────────────────────────────────
-
 
 // ── ToggleSwitch ─────────────────────────────────────────
 
@@ -63,16 +61,66 @@ function ToggleSwitch({
     );
 }
 
+// ── Select ─────────────────────────────────────────────
+
+function Select({
+    value,
+    onChange,
+    options,
+}: {
+    value: string;
+    onChange: (v: string) => void;
+    options: { value: string; label: string }[];
+}) {
+    return (
+        <select
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            className="w-full bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-green-500 appearance-none cursor-pointer"
+        >
+            {options.map((o) => (
+                <option key={o.value} value={o.value}>
+                    {o.label}
+                </option>
+            ))}
+        </select>
+    );
+}
+
+// ── 탭 정의 ──────────────────────────────────────────────
+
+type TabId = "general" | "download" | "auth" | "notifications" | "appearance" | "info";
+
+const TABS: { id: TabId; label: string; icon: string }[] = [
+    { id: "general",       label: "일반",   icon: "⚙️" },
+    { id: "download",      label: "다운로드", icon: "⬇️" },
+    { id: "auth",          label: "인증",   icon: "🔑" },
+    { id: "notifications", label: "알림",   icon: "🔔" },
+    { id: "appearance",    label: "외관",   icon: "🎨" },
+    { id: "info",          label: "정보",   icon: "ℹ️" },
+];
+
 // ── Settings 메인 컴포넌트 ────────────────────────────────
 
 export default function Settings() {
     const [settings, setSettings] = useState<SettingsType | null>(null);
     const [isDocker, setIsDocker] = useState(false);
+    const [activeTab, setActiveTab] = useState<TabId>("general");
     const toast = useToast();
 
     // ── Auth state ──
     const [nidAut, setNidAut] = useState("");
     const [nidSes, setNidSes] = useState("");
+
+    // ── TwitCasting auth state ──
+    const [twitcastingClientId, setTwitcastingClientId] = useState("");
+    const [twitcastingClientSecret, setTwitcastingClientSecret] = useState("");
+    const [twitcastingSaving, setTwitcastingSaving] = useState(false);
+
+    // ── Twitter Spaces auth state ──
+    const [twitterBearerToken, setTwitterBearerToken] = useState("");
+    const [twitterCookieFile, setTwitterCookieFile] = useState("");
+    const [twitterSaving, setTwitterSaving] = useState(false);
 
     // ── Download state ──
     const [keepParts, setKeepParts] = useState(false);
@@ -164,6 +212,47 @@ export default function Settings() {
             }
         } catch (e: unknown) {
             toast.error(getErrorMessage(e, "검증에 실패했습니다."));
+        }
+    };
+
+    const handleSaveTwitcasting = async () => {
+        if (!twitcastingClientId || !twitcastingClientSecret) {
+            toast.error("Client ID와 Client Secret을 모두 입력하세요.");
+            return;
+        }
+        setTwitcastingSaving(true);
+        try {
+            await api.updateTwitcastingSettings({
+                client_id: twitcastingClientId,
+                client_secret: twitcastingClientSecret,
+            });
+            toast.success("TwitCasting 인증 설정이 저장되었습니다.");
+            setTwitcastingClientId("");
+            setTwitcastingClientSecret("");
+        } catch (e: unknown) {
+            toast.error(getErrorMessage(e, "TwitCasting 설정 저장에 실패했습니다."));
+        } finally {
+            setTwitcastingSaving(false);
+        }
+    };
+
+    const handleSaveTwitter = async () => {
+        if (!twitterBearerToken) {
+            toast.error("Bearer Token을 입력하세요.");
+            return;
+        }
+        setTwitterSaving(true);
+        try {
+            await api.updateTwitterSettings({
+                bearer_token: twitterBearerToken,
+                cookie_file: twitterCookieFile || undefined,
+            });
+            toast.success("Twitter Spaces 인증 설정이 저장되었습니다.");
+            setTwitterBearerToken("");
+        } catch (e: unknown) {
+            toast.error(getErrorMessage(e, "Twitter 설정 저장에 실패했습니다."));
+        } finally {
+            setTwitterSaving(false);
         }
     };
 
@@ -266,12 +355,29 @@ export default function Settings() {
                 <p className="text-zinc-400">애플리케이션 설정을 관리합니다.</p>
             </div>
 
-            <div className="grid gap-6 lg:grid-cols-2">
-                {/* ════════════════════════════════════════════
-                    LEFT COLUMN
-                   ════════════════════════════════════════════ */}
-                <div className="space-y-6">
-                    {/* ── General Settings Card ── */}
+            {/* 탭 네비게이션 */}
+            <div className="flex gap-1 border-b border-zinc-800 overflow-x-auto">
+                {TABS.map((tab) => (
+                    <button
+                        key={tab.id}
+                        onClick={() => setActiveTab(tab.id)}
+                        className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium whitespace-nowrap transition-colors border-b-2 -mb-px ${
+                            activeTab === tab.id
+                                ? "border-green-500 text-green-400"
+                                : "border-transparent text-zinc-500 hover:text-zinc-300"
+                        }`}
+                    >
+                        <span>{tab.icon}</span>
+                        {tab.label}
+                    </button>
+                ))}
+            </div>
+
+            {/* 탭 콘텐츠 */}
+            <div className="space-y-6">
+
+                {/* ══════════════════ 일반 탭 ══════════════════ */}
+                {activeTab === "general" && (
                     <div className="bg-zinc-900/50 p-6 rounded-xl border border-zinc-800 space-y-5">
                         <h3 className="text-lg font-semibold text-white flex items-center gap-2">
                             <SettingsIcon className="w-5 h-5 text-green-500" />
@@ -322,10 +428,8 @@ export default function Settings() {
                                 활성화 시 콘텐츠 종류별로 저장 경로를 분리할 수 있습니다.
                             </p>
 
-                            {/* 펼침 영역 */}
                             {splitDownloadDirs && (
                                 <div className="space-y-4 pl-4 border-l-2 border-zinc-700 pt-1">
-                                    {/* 치지직 VOD/클립 */}
                                     <div className="space-y-2">
                                         <label className="text-xs font-medium text-zinc-400 flex items-center gap-1.5">
                                             <Folder className="w-3.5 h-3.5" />
@@ -342,12 +446,9 @@ export default function Settings() {
                                                 placeholder="비어있으면 기본 저장 경로 사용"
                                             />
                                         )}
-                                        <p className="text-xs text-zinc-600">
-                                            chzzk.naver.com URL 다운로드에 적용됩니다.
-                                        </p>
+                                        <p className="text-xs text-zinc-600">chzzk.naver.com URL 다운로드에 적용됩니다.</p>
                                     </div>
 
-                                    {/* 외부 다운로드 */}
                                     <div className="space-y-2">
                                         <label className="text-xs font-medium text-zinc-400 flex items-center gap-1.5">
                                             <Folder className="w-3.5 h-3.5" />
@@ -364,9 +465,7 @@ export default function Settings() {
                                                 placeholder="비어있으면 기본 저장 경로 사용"
                                             />
                                         )}
-                                        <p className="text-xs text-zinc-600">
-                                            유튜브 등 외부 URL(yt-dlp) 다운로드에 적용됩니다.
-                                        </p>
+                                        <p className="text-xs text-zinc-600">유튜브 등 외부 URL(yt-dlp) 다운로드에 적용됩니다.</p>
                                     </div>
                                 </div>
                             )}
@@ -383,14 +482,10 @@ export default function Settings() {
                                 min={5}
                                 max={300}
                                 value={monitorInterval}
-                                onChange={(e) =>
-                                    setMonitorInterval(parseInt(e.target.value) || 30)
-                                }
+                                onChange={(e) => setMonitorInterval(parseInt(e.target.value) || 30)}
                                 className="w-full bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-green-500"
                             />
-                            <p className="text-xs text-zinc-500">
-                                채널 라이브 상태를 확인하는 간격 (5~300초).
-                            </p>
+                            <p className="text-xs text-zinc-500">채널 라이브 상태를 확인하는 간격 (5~300초).</p>
                         </div>
 
                         {/* Output Format */}
@@ -429,275 +524,347 @@ export default function Settings() {
                                     { value: "480p", label: "480p" },
                                 ]}
                             />
-                            <p className="text-xs text-zinc-500">
-                                Streamlink이 지원하는 화질 중 선택됩니다.
-                            </p>
+                            <p className="text-xs text-zinc-500">Streamlink이 지원하는 화질 중 선택됩니다.</p>
                         </div>
 
-                        {/* Save Button */}
                         <button
                             onClick={handleSaveGeneralSettings}
                             disabled={genSaving}
                             className="w-full bg-green-600 hover:bg-green-500 disabled:bg-zinc-700 text-white py-2.5 rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
                         >
-                            {genSaving ? (
-                                <Loader2 className="w-4 h-4 animate-spin" />
-                            ) : (
-                                <Save className="w-4 h-4" />
-                            )}
+                            {genSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                             {genSaving ? "저장 중..." : "일반 설정 저장"}
                         </button>
                     </div>
+                )}
 
-                    {/* ── VOD Download Settings Card ── */}
-                    <div className="bg-zinc-900/50 p-6 rounded-xl border border-zinc-800 space-y-5">
-                        <h3 className="text-lg font-semibold text-white flex items-center gap-2">
-                            <Film className="w-5 h-5 text-purple-500" />
-                            VOD 다운로드 설정
-                        </h3>
-
-                        <div className="space-y-4">
-                            <div className="space-y-2">
-                                <label className="text-sm font-medium text-zinc-300 flex items-center gap-2">
-                                    <Download className="w-4 h-4" />
-                                    동시 다운로드 개수
-                                </label>
-                                <input
-                                    type="number"
-                                    className="w-full bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-purple-500"
-                                    value={vodMaxConcurrent}
-                                    onChange={(e) => setVodMaxConcurrent(Number(e.target.value))}
-                                    min={1}
-                                    max={10}
-                                />
-                                <p className="text-xs text-zinc-500">
-                                    한 번에 다운로드할 수 있는 최대 영상 개수 (1-10개)
-                                </p>
-                            </div>
-
-                            <div className="space-y-2">
-                                <label className="text-sm font-medium text-zinc-300 flex items-center gap-2">
-                                    <Gauge className="w-4 h-4" />
-                                    기본 화질
-                                </label>
-                                <Select
-                                    value={vodDefaultQuality}
-                                    onChange={setVodDefaultQuality}
-                                    options={[
-                                        { value: "best", label: "최고 화질 (Best)" },
-                                        { value: "1080p", label: "1080p" },
-                                        { value: "720p", label: "720p" },
-                                        { value: "480p", label: "480p" },
-                                    ]}
-                                />
-                                <p className="text-xs text-zinc-500">
-                                    VOD 다운로드 시 기본으로 사용할 화질
-                                </p>
-                            </div>
-
-                            <div className="space-y-2">
-                                <label className="text-sm font-medium text-zinc-300 flex items-center gap-2">
-                                    <Gauge className="w-4 h-4" />
-                                    최대 다운로드 속도 (MB/s)
-                                </label>
-                                <input
-                                    type="number"
-                                    className="w-full bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-purple-500"
-                                    value={vodMaxSpeed}
-                                    onChange={(e) => setVodMaxSpeed(Number(e.target.value))}
-                                    min={0}
-                                    max={1000}
-                                />
-                                <p className="text-xs text-zinc-500">
-                                    0 = 무제한, 네트워크 대역폭 제한 시 사용
-                                </p>
-                            </div>
-                        </div>
-
-                        <button
-                            onClick={handleSaveVodSettings}
-                            disabled={vodSaving}
-                            className="w-full bg-purple-600 hover:bg-purple-500 text-white font-bold py-2 px-4 rounded-lg transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2"
-                        >
-                            {vodSaving ? (
-                                <Loader2 className="w-4 h-4 animate-spin" />
-                            ) : (
-                                <Save className="w-4 h-4" />
-                            )}
-                            {vodSaving ? "저장 중..." : "VOD 설정 저장"}
-                        </button>
-                    </div>
-                </div>
-
-                {/* ════════════════════════════════════════════
-                    RIGHT COLUMN
-                   ════════════════════════════════════════════ */}
-                <div className="space-y-6">
-                    {/* ── Authentication Card ── */}
-                    <div className="bg-zinc-900/50 p-6 rounded-xl border border-zinc-800 space-y-5">
-                        <div className="flex items-center justify-between">
+                {/* ══════════════════ 다운로드 탭 ══════════════════ */}
+                {activeTab === "download" && (
+                    <div className="space-y-6">
+                        {/* VOD Download Settings */}
+                        <div className="bg-zinc-900/50 p-6 rounded-xl border border-zinc-800 space-y-5">
                             <h3 className="text-lg font-semibold text-white flex items-center gap-2">
-                                <Key className="w-5 h-5 text-yellow-500" />
-                                인증 (Authentication)
+                                <Film className="w-5 h-5 text-purple-500" />
+                                VOD 다운로드 설정
                             </h3>
-                            <span
-                                className={`px-2 py-1 rounded text-xs font-bold ${settings?.authenticated
-                                    ? "bg-green-500/20 text-green-400"
-                                    : "bg-red-500/20 text-red-400"
-                                    }`}
+
+                            <div className="space-y-4">
+                                <div className="space-y-2">
+                                    <label className="text-sm font-medium text-zinc-300 flex items-center gap-2">
+                                        <Download className="w-4 h-4" />
+                                        동시 다운로드 개수
+                                    </label>
+                                    <input
+                                        type="number"
+                                        className="w-full bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-purple-500"
+                                        value={vodMaxConcurrent}
+                                        onChange={(e) => setVodMaxConcurrent(Number(e.target.value))}
+                                        min={1}
+                                        max={10}
+                                    />
+                                    <p className="text-xs text-zinc-500">한 번에 다운로드할 수 있는 최대 영상 개수 (1-10개)</p>
+                                </div>
+
+                                <div className="space-y-2">
+                                    <label className="text-sm font-medium text-zinc-300 flex items-center gap-2">
+                                        <Gauge className="w-4 h-4" />
+                                        기본 화질
+                                    </label>
+                                    <Select
+                                        value={vodDefaultQuality}
+                                        onChange={setVodDefaultQuality}
+                                        options={[
+                                            { value: "best", label: "최고 화질 (Best)" },
+                                            { value: "1080p", label: "1080p" },
+                                            { value: "720p", label: "720p" },
+                                            { value: "480p", label: "480p" },
+                                        ]}
+                                    />
+                                    <p className="text-xs text-zinc-500">VOD 다운로드 시 기본으로 사용할 화질</p>
+                                </div>
+
+                                <div className="space-y-2">
+                                    <label className="text-sm font-medium text-zinc-300 flex items-center gap-2">
+                                        <Gauge className="w-4 h-4" />
+                                        최대 다운로드 속도 (MB/s)
+                                    </label>
+                                    <input
+                                        type="number"
+                                        className="w-full bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-purple-500"
+                                        value={vodMaxSpeed}
+                                        onChange={(e) => setVodMaxSpeed(Number(e.target.value))}
+                                        min={0}
+                                        max={1000}
+                                    />
+                                    <p className="text-xs text-zinc-500">0 = 무제한, 네트워크 대역폭 제한 시 사용</p>
+                                </div>
+                            </div>
+
+                            <button
+                                onClick={handleSaveVodSettings}
+                                disabled={vodSaving}
+                                className="w-full bg-purple-600 hover:bg-purple-500 text-white font-bold py-2 px-4 rounded-lg transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2"
                             >
-                                {settings?.authenticated ? "AUTHENTICATED" : "GUEST MODE"}
-                            </span>
+                                {vodSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                                {vodSaving ? "저장 중..." : "VOD 설정 저장"}
+                            </button>
                         </div>
 
-                        <div className="space-y-4">
-                            <div className="space-y-2">
-                                <label className="text-sm font-medium text-zinc-300">
-                                    NID_AUT
+                        {/* Download Settings */}
+                        <div className="bg-zinc-900/50 p-6 rounded-xl border border-zinc-800 space-y-5">
+                            <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                                <Download className="w-5 h-5 text-blue-500" />
+                                다운로드 설정
+                            </h3>
+
+                            <div>
+                                <label className="block text-sm font-medium text-zinc-300 mb-2">
+                                    미완료 파일 보관 (.part)
+                                </label>
+                                <div className="flex items-center gap-3">
+                                    <ToggleSwitch
+                                        checked={keepParts}
+                                        onChange={setKeepParts}
+                                        activeColor="bg-green-600"
+                                        focusRingColor="focus:ring-green-500"
+                                    />
+                                    <span className="text-sm text-zinc-500">
+                                        {keepParts ? "취소/오류 시 보관" : "취소 시 삭제"}
+                                    </span>
+                                </div>
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium text-zinc-300 mb-2 flex items-center gap-2">
+                                    <RefreshCcw className="w-4 h-4" />
+                                    자동 재시도 횟수
                                 </label>
                                 <input
-                                    type="password"
+                                    type="number"
+                                    min={0}
+                                    max={100}
+                                    value={maxRetries}
+                                    onChange={(e) => setMaxRetries(parseInt(e.target.value) || 0)}
                                     className="w-full bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-green-500"
-                                    value={nidAut}
-                                    onChange={(e) => setNidAut(e.target.value)}
-                                    placeholder="NID_AUT 쿠키 값 입력..."
                                 />
+                                <p className="text-xs text-zinc-500 mt-1">라이브 녹화 중단 시 자동 재시도 횟수.</p>
                             </div>
-                            <div className="space-y-2">
-                                <label className="text-sm font-medium text-zinc-300">
-                                    NID_SES
+
+                            {/* Chat Archive (다운로드 관련) */}
+                            <div>
+                                <label className="block text-sm font-medium text-zinc-300 mb-2">
+                                    실시간 채팅 저장
                                 </label>
-                                <input
-                                    type="password"
-                                    className="w-full bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-green-500"
-                                    value={nidSes}
-                                    onChange={(e) => setNidSes(e.target.value)}
-                                    placeholder="NID_SES 쿠키 값 입력..."
-                                />
+                                <div className="flex items-center gap-3">
+                                    <ToggleSwitch
+                                        checked={chatArchiveEnabled}
+                                        onChange={setChatArchiveEnabled}
+                                        activeColor="bg-cyan-600"
+                                        focusRingColor="focus:ring-cyan-500"
+                                    />
+                                    <span className="text-sm text-zinc-500">
+                                        {chatArchiveEnabled ? "녹화 시 채팅 자동 저장" : "채팅 저장 안 함"}
+                                    </span>
+                                </div>
+                                <p className="text-xs text-zinc-500 mt-2">
+                                    활성화 시 녹화와 함께 채팅 메시지를 JSONL 파일로 저장합니다.
+                                </p>
+                            </div>
+
+                            <div className="flex gap-3">
+                                <button
+                                    onClick={handleSaveDownloadSettings}
+                                    disabled={dlSaving}
+                                    className="flex-1 bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-700 text-white py-2.5 rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
+                                >
+                                    {dlSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                                    {dlSaving ? "저장 중..." : "저장"}
+                                </button>
+                                <button
+                                    onClick={handleSaveChatSettings}
+                                    disabled={chatSaving}
+                                    className="flex-1 bg-cyan-600 hover:bg-cyan-500 disabled:bg-zinc-700 text-white py-2.5 rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
+                                >
+                                    {chatSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <MessageSquare className="w-4 h-4" />}
+                                    {chatSaving ? "저장 중..." : "채팅 설정 저장"}
+                                </button>
                             </div>
                         </div>
-
-                        <div className="flex gap-3">
-                            <button
-                                onClick={handleUpdateCookies}
-                                className="flex-1 bg-zinc-800 hover:bg-zinc-700 text-white py-2 rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
-                            >
-                                <Save className="w-4 h-4" /> 저장
-                            </button>
-                            <button
-                                onClick={handleTestCookies}
-                                className="flex-1 bg-green-600 hover:bg-green-500 text-white py-2 rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
-                            >
-                                <Shield className="w-4 h-4" /> 검증
-                            </button>
-                        </div>
                     </div>
+                )}
 
-                    {/* ── Download Settings Card ── */}
-                    <div className="bg-zinc-900/50 p-6 rounded-xl border border-zinc-800 space-y-5">
-                        <h3 className="text-lg font-semibold text-white flex items-center gap-2">
-                            <Download className="w-5 h-5 text-blue-500" />
-                            다운로드 설정
-                        </h3>
-
-                        {/* Keep Parts Toggle */}
-                        <div>
-                            <label className="block text-sm font-medium text-zinc-300 mb-2">
-                                미완료 파일 보관 (.part)
-                            </label>
-                            <div className="flex items-center gap-3">
-                                <ToggleSwitch
-                                    checked={keepParts}
-                                    onChange={setKeepParts}
-                                    activeColor="bg-green-600"
-                                    focusRingColor="focus:ring-green-500"
-                                />
-                                <span className="text-sm text-zinc-500">
-                                    {keepParts ? "취소/오류 시 보관" : "취소 시 삭제"}
+                {/* ══════════════════ 인증 탭 ══════════════════ */}
+                {activeTab === "auth" && (
+                    <div className="space-y-6">
+                        {/* ── Chzzk 인증 ── */}
+                        <div className="bg-zinc-900/50 p-6 rounded-xl border border-zinc-800 space-y-5">
+                            <div className="flex items-center justify-between">
+                                <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                                    <span className="w-3 h-3 rounded-full bg-purple-400 inline-block" />
+                                    치지직 (Chzzk)
+                                </h3>
+                                <span className={`px-2 py-1 rounded text-xs font-bold ${
+                                    settings?.authenticated
+                                        ? "bg-green-500/20 text-green-400"
+                                        : "bg-red-500/20 text-red-400"
+                                }`}>
+                                    {settings?.authenticated ? "AUTHENTICATED" : "GUEST MODE"}
                                 </span>
                             </div>
-                        </div>
 
-                        {/* Max Retries */}
-                        <div>
-                            <label className="block text-sm font-medium text-zinc-300 mb-2 flex items-center gap-2">
-                                <RefreshCcw className="w-4 h-4" />
-                                자동 재시도 횟수
-                            </label>
-                            <input
-                                type="number"
-                                min={0}
-                                max={100}
-                                value={maxRetries}
-                                onChange={(e) =>
-                                    setMaxRetries(parseInt(e.target.value) || 0)
-                                }
-                                className="w-full bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-green-500"
-                            />
-                            <p className="text-xs text-zinc-500 mt-1">
-                                라이브 녹화 중단 시 자동 재시도 횟수.
-                            </p>
-                        </div>
-
-                        {/* Save Button */}
-                        <button
-                            onClick={handleSaveDownloadSettings}
-                            disabled={dlSaving}
-                            className="w-full bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-700 text-white py-2.5 rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
-                        >
-                            {dlSaving ? (
-                                <Loader2 className="w-4 h-4 animate-spin" />
-                            ) : (
-                                <Save className="w-4 h-4" />
-                            )}
-                            {dlSaving ? "저장 중..." : "다운로드 설정 저장"}
-                        </button>
-                    </div>
-
-                    {/* ── Chat Settings Card ── */}
-                    <div className="bg-zinc-900/50 p-6 rounded-xl border border-zinc-800 space-y-5">
-                        <h3 className="text-lg font-semibold text-white flex items-center gap-2">
-                            <MessageSquare className="w-5 h-5 text-cyan-500" />
-                            채팅 아카이빙
-                        </h3>
-
-                        <div>
-                            <label className="block text-sm font-medium text-zinc-300 mb-2">
-                                실시간 채팅 저장
-                            </label>
-                            <div className="flex items-center gap-3">
-                                <ToggleSwitch
-                                    checked={chatArchiveEnabled}
-                                    onChange={setChatArchiveEnabled}
-                                    activeColor="bg-cyan-600"
-                                    focusRingColor="focus:ring-cyan-500"
-                                />
-                                <span className="text-sm text-zinc-500">
-                                    {chatArchiveEnabled
-                                        ? "녹화 시 채팅 자동 저장"
-                                        : "채팅 저장 안 함"}
-                                </span>
+                            <div className="space-y-4">
+                                <div className="space-y-2">
+                                    <label className="text-sm font-medium text-zinc-300">NID_AUT</label>
+                                    <input
+                                        type="password"
+                                        className="w-full bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-purple-500"
+                                        value={nidAut}
+                                        onChange={(e) => setNidAut(e.target.value)}
+                                        placeholder="NID_AUT 쿠키 값 입력..."
+                                    />
+                                </div>
+                                <div className="space-y-2">
+                                    <label className="text-sm font-medium text-zinc-300">NID_SES</label>
+                                    <input
+                                        type="password"
+                                        className="w-full bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-purple-500"
+                                        value={nidSes}
+                                        onChange={(e) => setNidSes(e.target.value)}
+                                        placeholder="NID_SES 쿠키 값 입력..."
+                                    />
+                                </div>
                             </div>
-                            <p className="text-xs text-zinc-500 mt-2">
-                                활성화 시 녹화와 함께 채팅 메시지를 JSONL 파일로 저장합니다.
-                            </p>
+
+                            <div className="flex gap-3">
+                                <button
+                                    onClick={handleUpdateCookies}
+                                    className="flex-1 bg-zinc-800 hover:bg-zinc-700 text-white py-2 rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
+                                >
+                                    <Save className="w-4 h-4" /> 저장
+                                </button>
+                                <button
+                                    onClick={handleTestCookies}
+                                    className="flex-1 bg-purple-600 hover:bg-purple-500 text-white py-2 rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
+                                >
+                                    <Shield className="w-4 h-4" /> 검증
+                                </button>
+                            </div>
                         </div>
 
-                        <button
-                            onClick={handleSaveChatSettings}
-                            disabled={chatSaving}
-                            className="w-full bg-cyan-600 hover:bg-cyan-500 disabled:bg-zinc-700 text-white py-2.5 rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
-                        >
-                            {chatSaving ? (
-                                <Loader2 className="w-4 h-4 animate-spin" />
-                            ) : (
-                                <Save className="w-4 h-4" />
-                            )}
-                            {chatSaving ? "저장 중..." : "채팅 설정 저장"}
-                        </button>
-                    </div>
+                        {/* ── TwitCasting 인증 ── */}
+                        <div className="bg-zinc-900/50 p-6 rounded-xl border border-zinc-800 space-y-5">
+                            <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                                <span className="w-3 h-3 rounded-full bg-orange-400 inline-block" />
+                                TwitCasting
+                            </h3>
+                            <p className="text-xs text-zinc-500">
+                                TwitCasting API v2 인증 정보입니다.{" "}
+                                <a
+                                    href="https://twitcasting.tv/developer.php"
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-orange-400 hover:underline"
+                                >
+                                    twitcasting.tv/developer.php
+                                </a>
+                                {" "}에서 앱 등록 후 발급받으세요.
+                            </p>
 
-                    {/* ── Discord Settings Card ── */}
+                            <div className="space-y-4">
+                                <div className="space-y-2">
+                                    <label className="text-sm font-medium text-zinc-300">Client ID</label>
+                                    <input
+                                        type="text"
+                                        className="w-full bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-orange-500"
+                                        value={twitcastingClientId}
+                                        onChange={(e) => setTwitcastingClientId(e.target.value)}
+                                        placeholder="TwitCasting Client ID..."
+                                    />
+                                </div>
+                                <div className="space-y-2">
+                                    <label className="text-sm font-medium text-zinc-300">Client Secret</label>
+                                    <input
+                                        type="password"
+                                        className="w-full bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-orange-500"
+                                        value={twitcastingClientSecret}
+                                        onChange={(e) => setTwitcastingClientSecret(e.target.value)}
+                                        placeholder="TwitCasting Client Secret..."
+                                    />
+                                </div>
+                            </div>
+
+                            <button
+                                onClick={handleSaveTwitcasting}
+                                disabled={twitcastingSaving}
+                                className="w-full bg-orange-600 hover:bg-orange-500 disabled:bg-zinc-700 text-white py-2.5 rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
+                            >
+                                {twitcastingSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                                {twitcastingSaving ? "저장 중..." : "TwitCasting 설정 저장"}
+                            </button>
+                        </div>
+
+                        {/* ── Twitter Spaces 인증 ── */}
+                        <div className="bg-zinc-900/50 p-6 rounded-xl border border-zinc-800 space-y-5">
+                            <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                                <span className="w-3 h-3 rounded-full bg-cyan-400 inline-block" />
+                                Twitter Spaces
+                            </h3>
+                            <p className="text-xs text-zinc-500">
+                                Twitter API v2 Bearer Token 및 쿠키 파일 설정입니다.{" "}
+                                <a
+                                    href="https://developer.twitter.com/en/portal/dashboard"
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-cyan-400 hover:underline"
+                                >
+                                    developer.twitter.com
+                                </a>
+                                {" "}에서 앱 생성 후 Bearer Token을 발급받으세요.
+                            </p>
+
+                            <div className="space-y-4">
+                                <div className="space-y-2">
+                                    <label className="text-sm font-medium text-zinc-300">Bearer Token</label>
+                                    <input
+                                        type="password"
+                                        className="w-full bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-cyan-500"
+                                        value={twitterBearerToken}
+                                        onChange={(e) => setTwitterBearerToken(e.target.value)}
+                                        placeholder="Twitter Bearer Token (변경 시에만 입력)..."
+                                    />
+                                </div>
+                                <div className="space-y-2">
+                                    <label className="text-sm font-medium text-zinc-300">
+                                        쿠키 파일 경로{" "}
+                                        <span className="text-zinc-500 font-normal">(선택 — Netscape 형식)</span>
+                                    </label>
+                                    <input
+                                        type="text"
+                                        className="w-full bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-cyan-500 font-mono text-sm"
+                                        value={twitterCookieFile}
+                                        onChange={(e) => setTwitterCookieFile(e.target.value)}
+                                        placeholder="/path/to/twitter_cookies.txt"
+                                    />
+                                    <p className="text-xs text-zinc-500">
+                                        yt-dlp로 스페이스 녹화 시 사용됩니다. 브라우저 확장(cookies.txt)으로 추출하세요.
+                                    </p>
+                                </div>
+                            </div>
+
+                            <button
+                                onClick={handleSaveTwitter}
+                                disabled={twitterSaving}
+                                className="w-full bg-cyan-600 hover:bg-cyan-500 disabled:bg-zinc-700 text-white py-2.5 rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
+                            >
+                                {twitterSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                                {twitterSaving ? "저장 중..." : "Twitter Spaces 설정 저장"}
+                            </button>
+                        </div>
+                    </div>
+                )}
+
+                {/* ══════════════════ 알림 탭 ══════════════════ */}
+                {activeTab === "notifications" && (
                     <div className="bg-zinc-900/50 p-6 rounded-xl border border-zinc-800 space-y-5">
                         <h3 className="text-lg font-semibold text-white flex items-center gap-2">
                             <MessageCircle className="w-5 h-5 text-purple-500" />
@@ -705,9 +872,7 @@ export default function Settings() {
                         </h3>
 
                         <div>
-                            <label className="block text-sm font-medium text-zinc-300 mb-2">
-                                Bot 토큰
-                            </label>
+                            <label className="block text-sm font-medium text-zinc-300 mb-2">Bot 토큰</label>
                             <input
                                 type="password"
                                 value={discordBotToken}
@@ -721,9 +886,7 @@ export default function Settings() {
                         </div>
 
                         <div>
-                            <label className="block text-sm font-medium text-zinc-300 mb-2">
-                                알림 채널 ID
-                            </label>
+                            <label className="block text-sm font-medium text-zinc-300 mb-2">알림 채널 ID</label>
                             <input
                                 type="text"
                                 value={discordChannelId}
@@ -737,13 +900,9 @@ export default function Settings() {
                         </div>
 
                         <div className="flex items-center gap-2 text-sm">
-                            <div
-                                className={`w-2 h-2 rounded-full ${settings?.discord_bot_configured ? "bg-green-500" : "bg-zinc-600"}`}
-                            />
+                            <div className={`w-2 h-2 rounded-full ${settings?.discord_bot_configured ? "bg-green-500" : "bg-zinc-600"}`} />
                             <span className="text-zinc-400">
-                                {settings?.discord_bot_configured
-                                    ? "Bot 설정됨 (재시작 후 활성화)"
-                                    : "Bot 미설정"}
+                                {settings?.discord_bot_configured ? "Bot 설정됨 (재시작 후 활성화)" : "Bot 미설정"}
                             </span>
                         </div>
 
@@ -752,66 +911,20 @@ export default function Settings() {
                             disabled={discordSaving}
                             className="w-full bg-purple-600 hover:bg-purple-500 disabled:bg-zinc-700 text-white py-2.5 rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
                         >
-                            {discordSaving ? (
-                                <Loader2 className="w-4 h-4 animate-spin" />
-                            ) : (
-                                <Save className="w-4 h-4" />
-                            )}
+                            {discordSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                             {discordSaving ? "저장 중..." : "Discord 설정 저장"}
                         </button>
                     </div>
+                )}
 
-                    {/* ── System Info Card ── */}
-                    <div className="bg-zinc-900/50 p-6 rounded-xl border border-zinc-800">
-                        <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
-                            <SettingsIcon className="w-5 h-5 text-zinc-500" />
-                            시스템 정보
-                        </h3>
-                        <div className="space-y-3 text-sm">
-                            <div className="flex justify-between py-2 border-b border-zinc-800">
-                                <span className="text-zinc-500">앱 이름</span>
-                                <span className="text-zinc-200">
-                                    {settings?.app_name || "Loading..."}
-                                </span>
-                            </div>
-                            <div className="flex justify-between py-2 border-b border-zinc-800">
-                                <span className="text-zinc-500">FFmpeg 경로</span>
-                                <span
-                                    className="text-zinc-200 truncate max-w-[220px]"
-                                    title={settings?.ffmpeg_path}
-                                >
-                                    {settings?.ffmpeg_path || "Loading..."}
-                                </span>
-                            </div>
-                            <div className="flex justify-between py-2 border-b border-zinc-800">
-                                <span className="text-zinc-500">서버</span>
-                                <span className="text-zinc-200">
-                                    {settings
-                                        ? `${settings.host}:${settings.port}`
-                                        : "Loading..."}
-                                </span>
-                            </div>
-                            <div className="flex justify-between py-2">
-                                <span className="text-zinc-500">Discord Bot</span>
-                                <span
-                                    className={`${settings?.discord_bot_configured
-                                        ? "text-green-400"
-                                        : "text-zinc-500"
-                                        }`}
-                                >
-                                    {settings?.discord_bot_configured
-                                        ? "연결됨"
-                                        : "미설정"}
-                                </span>
-                            </div>
-                        </div>
-                    </div>
-
+                {/* ══════════════════ 외관 탭 ══════════════════ */}
+                {activeTab === "appearance" && (
                     <div className="bg-zinc-900/50 p-6 rounded-xl border border-zinc-800 space-y-5">
                         <h3 className="text-lg font-semibold text-white flex items-center gap-2">
                             <Palette className="w-5 h-5" style={{ color: 'var(--primary)' }} />
                             외관 (Appearance)
                         </h3>
+
                         <div className="space-y-3">
                             <label className="text-sm font-medium text-zinc-300 flex items-center gap-2">
                                 <Palette className="w-4 h-4" />
@@ -827,7 +940,6 @@ export default function Settings() {
                                         style={{ backgroundColor: t.primary }}
                                     />
                                 ))}
-                                {/* 사용자 지정 컬러 피커 */}
                                 <div className="relative">
                                     <input
                                         ref={colorPickerRef}
@@ -839,8 +951,7 @@ export default function Settings() {
                                     <button
                                         onClick={() => colorPickerRef.current?.click()}
                                         title="사용자 지정 색상"
-                                        className={`w-10 h-10 rounded-full border-4 transition-all hover:scale-110 overflow-hidden ${themeId === 'custom' ? 'border-white scale-110' : 'border-transparent'
-                                            }`}
+                                        className={`w-10 h-10 rounded-full border-4 transition-all hover:scale-110 overflow-hidden ${themeId === 'custom' ? 'border-white scale-110' : 'border-transparent'}`}
                                         style={{
                                             background: themeId === 'custom'
                                                 ? customColor
@@ -857,6 +968,7 @@ export default function Settings() {
                                 </span>
                             </p>
                         </div>
+
                         <div className="space-y-2">
                             <label className="text-sm font-medium text-zinc-300 flex items-center gap-2">
                                 <Type className="w-4 h-4" />
@@ -882,6 +994,7 @@ export default function Settings() {
                             </div>
                             <p className="text-xs text-zinc-500">브라우저 탭 제목이 변경됩니다 (최대 32자)</p>
                         </div>
+
                         <div className="space-y-2">
                             <label className="text-sm font-medium text-zinc-300 flex items-center gap-2">
                                 <ImageIcon className="w-4 h-4" />
@@ -912,6 +1025,7 @@ export default function Settings() {
                             </div>
                             <p className="text-xs text-zinc-500">브라우저 탭 좌측 아이콘이 변경됩니다</p>
                         </div>
+
                         <button
                             onClick={() => { resetAll(); setTitleInput('Chzzk Recorder Pro'); }}
                             className="w-full bg-zinc-800 hover:bg-zinc-700 text-zinc-400 py-2.5 rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
@@ -920,34 +1034,55 @@ export default function Settings() {
                             외관 초기화 (기본값 복원)
                         </button>
                     </div>
-                </div>
+                )}
+
+                {/* ══════════════════ 정보 탭 ══════════════════ */}
+                {activeTab === "info" && (
+                    <div className="bg-zinc-900/50 p-6 rounded-xl border border-zinc-800">
+                        <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+                            <Info className="w-5 h-5 text-zinc-500" />
+                            시스템 정보
+                        </h3>
+                        <div className="space-y-3 text-sm">
+                            <div className="flex justify-between py-2 border-b border-zinc-800">
+                                <span className="text-zinc-500">앱 이름</span>
+                                <span className="text-zinc-200">{settings?.app_name || "Loading..."}</span>
+                            </div>
+                            <div className="flex justify-between py-2 border-b border-zinc-800">
+                                <span className="text-zinc-500">FFmpeg 경로</span>
+                                <span className="text-zinc-200 truncate max-w-[220px]" title={settings?.ffmpeg_path}>
+                                    {settings?.ffmpeg_path || "Loading..."}
+                                </span>
+                            </div>
+                            <div className="flex justify-between py-2 border-b border-zinc-800">
+                                <span className="text-zinc-500">서버</span>
+                                <span className="text-zinc-200">
+                                    {settings ? `${settings.host}:${settings.port}` : "Loading..."}
+                                </span>
+                            </div>
+                            <div className="flex justify-between py-2 border-b border-zinc-800">
+                                <span className="text-zinc-500">Discord Bot</span>
+                                <span className={settings?.discord_bot_configured ? "text-green-400" : "text-zinc-500"}>
+                                    {settings?.discord_bot_configured ? "연결됨" : "미설정"}
+                                </span>
+                            </div>
+                            <div className="flex justify-between py-2 border-b border-zinc-800">
+                                <span className="text-zinc-500">TwitCasting 설정</span>
+                                <span className={settings?.twitcasting_client_id ? "text-orange-400" : "text-zinc-500"}>
+                                    {settings?.twitcasting_client_id ? "설정됨" : "미설정"}
+                                </span>
+                            </div>
+                            <div className="flex justify-between py-2">
+                                <span className="text-zinc-500">Twitter Spaces 설정</span>
+                                <span className={settings?.twitter_bearer_token ? "text-cyan-400" : "text-zinc-500"}>
+                                    {settings?.twitter_bearer_token ? "설정됨" : "미설정"}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
             </div>
         </div>
-    );
-}
-
-// ── Select (파일 스코프 컴포넌트) ────────────────────────
-
-function Select({
-    value,
-    onChange,
-    options,
-}: {
-    value: string;
-    onChange: (v: string) => void;
-    options: { value: string; label: string }[];
-}) {
-    return (
-        <select
-            value={value}
-            onChange={(e) => onChange(e.target.value)}
-            className="w-full bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-green-500 appearance-none cursor-pointer"
-        >
-            {options.map((o) => (
-                <option key={o.value} value={o.value}>
-                    {o.label}
-                </option>
-            ))}
-        </select>
     );
 }

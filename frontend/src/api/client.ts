@@ -11,7 +11,17 @@ export const client = axios.create({
 
 // ── Types ───────────────────────────────────────────────
 
+export type Platform = "chzzk" | "twitcasting" | "twitter_spaces";
+
+export const PLATFORM_LABELS: Record<Platform, string> = {
+    chzzk: "치지직",
+    twitcasting: "TwitCasting",
+    twitter_spaces: "Twitter Spaces",
+};
+
 export interface Channel {
+    composite_key?: string;
+    platform?: Platform;
     channel_id: string;
     auto_record: boolean;
     is_live: boolean;
@@ -104,6 +114,30 @@ export interface Settings {
     split_download_dirs: boolean;
     vod_chzzk_dir: string;
     vod_external_dir: string;
+
+    // TwitCasting 인증
+    twitcasting_client_id?: string;
+    twitcasting_client_secret?: string;
+
+    // Twitter Spaces 인증
+    twitter_bearer_token?: string;
+    twitter_cookie_file?: string;
+}
+
+export interface PlatformStatus {
+    chzzk: { enabled: boolean; authenticated: boolean };
+    twitcasting: { enabled: boolean; authenticated: boolean };
+    twitter_spaces: { enabled: boolean; authenticated: boolean; cookie_file_set: boolean };
+}
+
+export interface TwitcastingSettingsUpdate {
+    client_id: string;
+    client_secret: string;
+}
+
+export interface TwitterSettingsUpdate {
+    bearer_token: string;
+    cookie_file?: string;
 }
 
 export interface GeneralSettingsUpdate {
@@ -343,6 +377,32 @@ export const api = {
         const res = await client.get<BrowseDirsResponse>("/settings/browse-dirs", {
             params: path !== undefined ? { path } : {},
         });
+        return res.data;
+    },
+
+    // Platform Channels (멀티 플랫폼)
+    addPlatformChannel: async (platform: Platform, channel_id: string, auto_record: boolean = true) => {
+        const res = await client.post("/platforms/channels", { platform, channel_id, auto_record });
+        return res.data;
+    },
+    removePlatformChannel: async (platform: Platform, channel_id: string) => {
+        const res = await client.delete(`/platforms/channels/${platform}/${channel_id}`);
+        return res.data;
+    },
+    togglePlatformAutoRecord: async (platform: Platform, channel_id: string) => {
+        const res = await client.patch(`/platforms/channels/${platform}/${channel_id}/auto-record`);
+        return res.data;
+    },
+    getPlatformStatus: async (): Promise<PlatformStatus> => {
+        const res = await client.get<PlatformStatus>("/platforms/status");
+        return res.data;
+    },
+    updateTwitcastingSettings: async (data: TwitcastingSettingsUpdate) => {
+        const res = await client.put("/platforms/settings/twitcasting", data);
+        return res.data;
+    },
+    updateTwitterSettings: async (data: TwitterSettingsUpdate) => {
+        const res = await client.put("/platforms/settings/twitter", data);
         return res.data;
     },
 

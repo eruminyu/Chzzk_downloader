@@ -1,6 +1,7 @@
 """
 Chzzk-Recorder-Pro: Conductor (비동기 오케스트레이터)
 다중 채널 감시 루프를 관리하고, 방송 시작 시 자동 녹화를 트리거한다.
+멀티 플랫폼(Chzzk, TwitCasting, Twitter Spaces)을 단일 Conductor로 통합 관리한다.
 """
 
 from __future__ import annotations
@@ -15,12 +16,15 @@ from typing import TYPE_CHECKING, Optional
 from app.core.config import get_settings
 from app.core.logger import logger
 from app.engine.auth import AuthManager
+from app.engine.base import Platform
 from app.engine.chat import ChatArchiver
 from app.engine.downloader import StreamLinkEngine
 from app.engine.pipeline import FFmpegPipeline, RecordingState
 
 if TYPE_CHECKING:
     from app.services.discord_bot import DiscordBotService
+    from app.engine.twitcasting import TwitcastingEngine
+    from app.engine.twitter_spaces import TwitterSpacesEngine
 
 
 @dataclass
@@ -28,6 +32,7 @@ class ChannelTask:
     """감시 대상 채널 정보."""
 
     channel_id: str
+    platform: Platform = Platform.CHZZK
     auto_record: bool = True
     pipeline: Optional[FFmpegPipeline] = field(default=None, repr=False)
     chat_archiver: Optional[ChatArchiver] = field(default=None, repr=False)
@@ -39,16 +44,22 @@ class ChannelTask:
     viewer_count: int = 0
     thumbnail_url: Optional[str] = None
     profile_image_url: Optional[str] = None
+    # Twitter Spaces 전용
+    spaces_process: Optional[asyncio.subprocess.Process] = field(default=None, repr=False)
+    _current_space_id: Optional[str] = None
 
 
 class Conductor:
     """비동기 오케스트레이터.
 
-    Python 3.14의 비동기 성능을 활용하여
-    단일 스레드로 수십 개의 채널을 동시 감시한다.
+    Python asyncio를 활용하여 단일 스레드로 수십 개의 채널을 동시 감시한다.
+    Chzzk, TwitCasting, Twitter Spaces를 통합 관리한다.
+
+    채널 키 형식: "platform:channel_id" (예: "chzzk:abc123", "twitcasting:someuser")
+    기존 Chzzk 전용 키("abc123")는 자동으로 "chzzk:abc123"으로 마이그레이션된다.
 
     주요 기능:
-        - 채널 등록/제거
+        - 채널 등록/제거 (플랫폼 포함)
         - 주기적 라이브 상태 확인
         - 방송 시작 감지 시 자동 녹화 트리거
         - 방송 종료 감지 시 녹화 중지
@@ -60,15 +71,54 @@ class Conductor:
         discord_bot: Optional[DiscordBotService] = None,
     ) -> None:
         self._auth = auth or AuthManager()
-        self._engine = StreamLinkEngine(auth=self._auth)
+        self._chzzk_engine = StreamLinkEngine(auth=self._auth)
+        self._twitcasting_engine: Optional[TwitcastingEngine] = None
+        self._twitter_spaces_engine: Optional[TwitterSpacesEngine] = None
         self._channels: dict[str, ChannelTask] = {}
         self._running = False
         self._persistence_path = Path("data/channels.json")
         self._discord_bot = discord_bot
-        # 라이브 감지 이력: channel_id → 날짜 문자열 set (하루 1회 카운트)
+        # 라이브 감지 이력: composite_key → 날짜 문자열 set (하루 1회 카운트)
         self._live_detections: dict[str, set[str]] = {}
         self._live_history_path = Path("data/live_history.json")
         self._load_persistence()
+
+    def _get_engine(self, platform: Platform):
+        """플랫폼에 맞는 엔진 인스턴스를 반환한다."""
+        if platform == Platform.CHZZK:
+            return self._chzzk_engine
+        elif platform == Platform.TWITCASTING:
+            if self._twitcasting_engine is None:
+                from app.engine.twitcasting import TwitcastingEngine
+                self._twitcasting_engine = TwitcastingEngine()
+            return self._twitcasting_engine
+        elif platform == Platform.TWITTER_SPACES:
+            if self._twitter_spaces_engine is None:
+                from app.engine.twitter_spaces import TwitterSpacesEngine
+                self._twitter_spaces_engine = TwitterSpacesEngine()
+            return self._twitter_spaces_engine
+        else:
+            raise ValueError(f"지원하지 않는 플랫폼: {platform}")
+
+    @staticmethod
+    def make_composite_key(platform: Platform, channel_id: str) -> str:
+        """복합 키를 생성한다."""
+        return f"{platform.value}:{channel_id}"
+
+    @staticmethod
+    def parse_composite_key(key: str) -> tuple[Platform, str]:
+        """복합 키를 (Platform, channel_id)로 파싱한다.
+
+        ':' 없는 레거시 키는 Chzzk 채널로 처리한다.
+        """
+        if ":" not in key:
+            return Platform.CHZZK, key
+        platform_str, channel_id = key.split(":", 1)
+        try:
+            return Platform(platform_str), channel_id
+        except ValueError:
+            logger.warning(f"알 수 없는 플랫폼 값 '{platform_str}', Chzzk으로 처리합니다.")
+            return Platform.CHZZK, channel_id
 
     @property
     def is_running(self) -> bool:
@@ -78,58 +128,73 @@ class Conductor:
     def channel_count(self) -> int:
         return len(self._channels)
 
-    def add_channel(self, channel_id: str, auto_record: bool = True) -> None:
+    def add_channel(
+        self,
+        channel_id: str,
+        auto_record: bool = True,
+        platform: Platform = Platform.CHZZK,
+    ) -> None:
         """감시할 채널을 등록한다."""
-        if channel_id in self._channels:
-            logger.warning(f"채널 '{channel_id}'은(는) 이미 등록되어 있습니다.")
+        composite_key = self.make_composite_key(platform, channel_id)
+
+        if composite_key in self._channels:
+            logger.warning(f"채널 '{composite_key}'은(는) 이미 등록되어 있습니다.")
             return
 
-        task = ChannelTask(channel_id=channel_id, auto_record=auto_record)
-        self._channels[channel_id] = task
-        logger.info(f"채널 등록: {channel_id} (auto_record={auto_record})")
-        
+        task = ChannelTask(
+            channel_id=channel_id,
+            platform=platform,
+            auto_record=auto_record,
+        )
+        self._channels[composite_key] = task
+        logger.info(f"채널 등록: {composite_key} (auto_record={auto_record})")
+
         self._save_persistence()
 
         # 이미 실행 중이면 즉시 감시 시작
         if self._running:
             task.monitor_task = asyncio.create_task(
-                self._monitor_channel(channel_id)
+                self._monitor_channel(composite_key)
             )
 
-    def toggle_auto_record(self, channel_id: str) -> bool:
+    def toggle_auto_record(self, composite_key: str) -> bool:
         """채널의 자동 녹화 설정을 토글한다.
 
         Returns:
             변경 후의 auto_record 값.
         """
-        task = self._channels.get(channel_id)
+        task = self._channels.get(composite_key)
         if task is None:
-            raise ValueError(f"채널 '{channel_id}'을(를) 찾을 수 없습니다.")
+            raise ValueError(f"채널 '{composite_key}'을(를) 찾을 수 없습니다.")
 
         task.auto_record = not task.auto_record
-        logger.info(f"[{channel_id}] 자동 녹화 {'ON' if task.auto_record else 'OFF'}")
+        logger.info(f"[{composite_key}] 자동 녹화 {'ON' if task.auto_record else 'OFF'}")
         self._save_persistence()
         return task.auto_record
 
-    async def remove_channel(self, channel_id: str) -> None:
+    async def remove_channel(self, composite_key: str) -> None:
         """채널을 감시 목록에서 제거한다."""
-        task = self._channels.pop(channel_id, None)
+        task = self._channels.pop(composite_key, None)
         if task is None:
-            logger.warning(f"채널 '{channel_id}'을(를) 찾을 수 없습니다.")
+            logger.warning(f"채널 '{composite_key}'을(를) 찾을 수 없습니다.")
             return
 
-        # 녹화 중이면 파이프라인 정지 (ffmpeg 프로세스 + 파일 핸들 해제)
+        # 녹화 중이면 파이프라인 정지
         pipe = task.pipeline
         if pipe is not None and pipe.state in (RecordingState.RECORDING, RecordingState.ERROR):
-            logger.info(f"[{channel_id}] 채널 제거 전 녹화 정지 중...")
-            await self._stop_recording(channel_id)
+            logger.info(f"[{composite_key}] 채널 제거 전 녹화 정지 중...")
+            await self._stop_recording(composite_key)
+
+        # Twitter Spaces 녹화 프로세스 종료
+        if task.spaces_process is not None:
+            await self._stop_spaces_recording(composite_key)
 
         # 감시 태스크 취소
         mt = task.monitor_task
         if mt is not None and not mt.done():
             mt.cancel()
 
-        logger.info(f"채널 제거: {channel_id}")
+        logger.info(f"채널 제거: {composite_key}")
         self._save_persistence()
 
     async def start(self) -> None:
@@ -141,9 +206,9 @@ class Conductor:
         self._running = True
         logger.info(f"Conductor 시작. 감시 채널 수: {self.channel_count}")
 
-        for channel_id, task in self._channels.items():
+        for composite_key, task in self._channels.items():
             task.monitor_task = asyncio.create_task(
-                self._monitor_channel(channel_id)
+                self._monitor_channel(composite_key)
             )
 
     async def stop(self) -> None:
@@ -151,11 +216,13 @@ class Conductor:
         self._running = False
         logger.info("Conductor 종료 요청...")
 
-        # 모든 녹화 중지
-        for channel_id, task in self._channels.items():
+        for composite_key, task in self._channels.items():
             pipe = task.pipeline
             if pipe is not None and pipe.state == RecordingState.RECORDING:
-                await self._stop_recording(channel_id)
+                await self._stop_recording(composite_key)
+
+            if task.spaces_process is not None:
+                await self._stop_spaces_recording(composite_key)
 
             mt = task.monitor_task
             if mt is not None and not mt.done():
@@ -168,8 +235,12 @@ class Conductor:
         try:
             self._persistence_path.parent.mkdir(parents=True, exist_ok=True)
             data = {
-                cid: {"auto_record": t.auto_record}
-                for cid, t in self._channels.items()
+                key: {
+                    "platform": t.platform.value,
+                    "channel_id": t.channel_id,
+                    "auto_record": t.auto_record,
+                }
+                for key, t in self._channels.items()
             }
             with open(self._persistence_path, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=4, ensure_ascii=False)
@@ -178,38 +249,63 @@ class Conductor:
             logger.error(f"채널 목록 저장 실패: {e}")
 
     def _load_persistence(self) -> None:
-        """파일에서 채널 목록을 로드한다."""
+        """파일에서 채널 목록을 로드한다.
+
+        레거시 포맷(키에 ':' 없음)은 Chzzk 채널로 자동 마이그레이션한다.
+        """
         if not self._persistence_path.exists():
             return
 
         try:
             with open(self._persistence_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            
-            for channel_id, config in data.items():
+
+            migrated = False
+            for key, config in data.items():
                 auto_record = config.get("auto_record", True)
-                self.add_channel(channel_id, auto_record=auto_record)
-            
+
+                # 레거시 키 마이그레이션 (':'없는 키 = 구버전 Chzzk)
+                if ":" not in key:
+                    logger.info(f"레거시 채널 키 마이그레이션: '{key}' → 'chzzk:{key}'")
+                    platform = Platform.CHZZK
+                    channel_id = key
+                    migrated = True
+                else:
+                    platform_str = config.get("platform", "chzzk")
+                    try:
+                        platform = Platform(platform_str)
+                    except ValueError:
+                        platform = Platform.CHZZK
+                    channel_id = config.get("channel_id", key.split(":", 1)[-1])
+
+                self.add_channel(channel_id, auto_record=auto_record, platform=platform)
+
+            if migrated:
+                # 마이그레이션된 경우 새 포맷으로 즉시 저장
+                self._save_persistence()
+                logger.info("레거시 채널 데이터 마이그레이션 완료.")
+
             logger.info(f"채널 목록 로드 완료 ({len(data)}개): {self._persistence_path}")
         except Exception as e:
             logger.error(f"채널 목록 로드 실패: {e}")
 
-    async def _monitor_channel(self, channel_id: str) -> None:
+    async def _monitor_channel(self, composite_key: str) -> None:
         """단일 채널의 라이브 상태를 주기적으로 확인한다."""
         settings = get_settings()
         interval = settings.monitor_interval
         retry_count = 0
         max_retries = settings.max_record_retries
 
-        logger.info(f"[{channel_id}] 감시 시작 (주기: {interval}초)")
+        logger.info(f"[{composite_key}] 감시 시작 (주기: {interval}초)")
 
         while self._running:
             try:
-                status = await self._engine.check_live_status(channel_id)
-                task = self._channels.get(channel_id)
-
+                task = self._channels.get(composite_key)
                 if task is None:
                     break
+
+                engine = self._get_engine(task.platform)
+                status = await engine.check_live_status(task.channel_id)
 
                 was_live = task.is_live
                 task.is_live = status["is_live"]
@@ -220,80 +316,101 @@ class Conductor:
                 task.thumbnail_url = status.get("thumbnail_url")
                 task.profile_image_url = status.get("profile_image_url")
 
+                # Twitter Spaces: space_id 업데이트
+                if task.platform == Platform.TWITTER_SPACES:
+                    task._current_space_id = status.get("space_id")
+
                 # ── 라이브 감지 날짜 기록 (하루 1회, 날짜 경계 자동 처리) ──
                 if status["is_live"]:
                     today = datetime.now().strftime("%Y-%m-%d")
-                    self._live_detections.setdefault(channel_id, set()).add(today)
+                    self._live_detections.setdefault(composite_key, set()).add(today)
 
                 # ── 방송 시작 감지 ──
                 if status["is_live"] and not was_live:
                     logger.info(
-                        f"[{channel_id}] 🔴 방송 시작 감지! "
+                        f"[{composite_key}] 🔴 방송 시작 감지! "
                         f"스트리머: {task.channel_name}, 제목: {task.title}"
                     )
                     if task.auto_record:
-                        await self._start_recording(channel_id, channel_name=task.channel_name, title=task.title)
+                        await self._start_recording(
+                            composite_key,
+                            channel_name=task.channel_name,
+                            title=task.title,
+                        )
                         retry_count = 0
 
                 # ── 방송 종료 감지 ──
                 elif not status["is_live"] and was_live:
-                    logger.info(f"[{channel_id}] ⚫ 방송 종료 감지.")
-                    await self._stop_recording(channel_id)
+                    logger.info(f"[{composite_key}] ⚫ 방송 종료 감지.")
+                    await self._stop_recording(composite_key)
                     retry_count = 0
 
-                # ── 채팅 아카이빙 동적 시작 (녹화 중 설정이 켜진 경우) ──
-                elif status["is_live"] and task.pipeline is not None \
-                        and task.pipeline.state == RecordingState.RECORDING \
-                        and task.chat_archiver is None \
-                        and get_settings().chat_archive_enabled:
+                # ── 채팅 아카이빙 동적 시작 (Chzzk 전용, 녹화 중 설정이 켜진 경우) ──
+                elif (
+                    status["is_live"]
+                    and task.platform == Platform.CHZZK
+                    and task.pipeline is not None
+                    and task.pipeline.state == RecordingState.RECORDING
+                    and task.chat_archiver is None
+                    and get_settings().chat_archive_enabled
+                ):
                     try:
                         output_file = task.pipeline.get_status().get("output_path")
                         if output_file:
                             chat_file = Path(output_file).with_suffix(".jsonl")
                             archiver = ChatArchiver(
-                                channel_id=channel_id,
+                                channel_id=task.channel_id,
                                 output_path=chat_file,
                                 auth=self._auth,
                             )
                             await archiver.start()
                             task.chat_archiver = archiver
-                            logger.info(f"[{channel_id}] 채팅 아카이빙 동적 시작: {chat_file}")
+                            logger.info(f"[{composite_key}] 채팅 아카이빙 동적 시작: {chat_file}")
                     except Exception as e:
-                        logger.error(f"[{channel_id}] 채팅 아카이빙 동적 시작 실패: {e}")
+                        logger.error(f"[{composite_key}] 채팅 아카이빙 동적 시작 실패: {e}")
 
-                # ── 녹화 오류 시 자동 재시작 ──
-                elif status["is_live"] and task.auto_record:
+                # ── 녹화 오류 시 자동 재시작 (Chzzk/TwitCasting 전용) ──
+                elif status["is_live"] and task.auto_record and task.platform != Platform.TWITTER_SPACES:
                     pipe = task.pipeline
                     if pipe is not None and pipe.state in (RecordingState.ERROR, RecordingState.COMPLETED):
                         if retry_count < max_retries:
                             retry_count += 1
                             logger.warning(
-                                f"[{channel_id}] 녹화 중단 감지. "
+                                f"[{composite_key}] 녹화 중단 감지. "
                                 f"자동 재녹화 시도 ({retry_count}/{max_retries})..."
                             )
-                            await asyncio.sleep(5)  # 재시작 전 짧은 대기
-                            await self._start_recording(channel_id, channel_name=task.channel_name, title=task.title)
+                            await asyncio.sleep(5)
+                            await self._start_recording(
+                                composite_key,
+                                channel_name=task.channel_name,
+                                title=task.title,
+                            )
                         elif retry_count == max_retries:
-                            retry_count += 1  # 로그 한 번만
+                            retry_count += 1
                             logger.error(
-                                f"[{channel_id}] 최대 재시도 횟수 초과. "
+                                f"[{composite_key}] 최대 재시도 횟수 초과. "
                                 f"녹화 시작 버튼으로 수동 재시작하세요."
                             )
 
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error(f"[{channel_id}] 감시 오류: {e}")
+                logger.error(f"[{composite_key}] 감시 오류: {e}")
 
             await asyncio.sleep(interval)
 
-    async def _stop_recording(self, channel_id: str) -> None:
+    async def _stop_recording(self, composite_key: str) -> None:
         """채널의 녹화 및 채팅 아카이빙을 중지한다."""
-        task = self._channels.get(channel_id)
+        task = self._channels.get(composite_key)
         if task is None:
             return
 
-        # 녹화 중지
+        # Twitter Spaces 녹화 중지
+        if task.platform == Platform.TWITTER_SPACES:
+            await self._stop_spaces_recording(composite_key)
+            return
+
+        # Chzzk/TwitCasting 파이프라인 중지
         pipe = task.pipeline
         if pipe is not None and pipe.state == RecordingState.RECORDING:
             await pipe.stop_recording()
@@ -303,11 +420,11 @@ class Conductor:
                 status = pipe.get_status()
                 duration = status.get("duration_seconds", 0)
                 output_file = status.get("output_file", "N/A")
-                file_size = status.get("file_size_bytes", 0) / (1024 * 1024)  # MB
+                file_size = status.get("file_size_bytes", 0) / (1024 * 1024)
 
                 await self._discord_bot.send_notification(
                     title="⏹ 녹화 완료",
-                    description=f"채널: **{task.channel_name or channel_id}**",
+                    description=f"채널: **{task.channel_name or composite_key}**",
                     color="blue",
                     fields={
                         "녹화 시간": f"{duration // 60:.0f}분 {duration % 60:.0f}초",
@@ -318,7 +435,7 @@ class Conductor:
 
         # 녹화 완료 이력 저장
         if pipe is not None and pipe.state == RecordingState.COMPLETED:
-            self._save_live_history(channel_id, task, pipe.get_status())
+            self._save_live_history(composite_key, task, pipe.get_status())
 
         # 채팅 아카이빙 중지
         archiver = task.chat_archiver
@@ -327,74 +444,146 @@ class Conductor:
                 await archiver.stop()
                 task.chat_archiver = None
             except Exception as e:
-                logger.error(f"[{channel_id}] 채팅 아카이빙 중지 실패: {e}")
+                logger.error(f"[{composite_key}] 채팅 아카이빙 중지 실패: {e}")
 
-    async def _start_recording(self, channel_id: str, channel_name: Optional[str] = None, title: Optional[str] = None) -> None:
+    async def _start_recording(
+        self,
+        composite_key: str,
+        channel_name: Optional[str] = None,
+        title: Optional[str] = None,
+    ) -> None:
         """채널의 녹화를 시작한다."""
-        task = self._channels.get(channel_id)
+        task = self._channels.get(composite_key)
         if task is None:
+            return
+
+        # Twitter Spaces는 별도 경로
+        if task.platform == Platform.TWITTER_SPACES:
+            await self._start_spaces_recording(composite_key, channel_name=channel_name, title=title)
             return
 
         try:
             settings = get_settings()
             quality = settings.recording_quality or "best"
-            stream_obj = self._engine.get_stream(channel_id, quality=quality)
-            pipeline = FFmpegPipeline(channel_id=channel_id)
+            engine = self._get_engine(task.platform)
+            stream_obj = engine.get_stream(task.channel_id, quality=quality)
+            pipeline = FFmpegPipeline(channel_id=task.channel_id)
             task.pipeline = pipeline
 
-            # 메타데이터 전달 (파일명 생성용)
             await pipeline.start_recording(
                 stream_obj,
                 streamer_name=channel_name or task.channel_name,
                 title=title or task.title
             )
-            logger.info(f"[{channel_id}] 자동 라이브 녹화 시작 (Hybrid, quality={quality}).")
+            logger.info(f"[{composite_key}] 자동 라이브 녹화 시작 (quality={quality}).")
 
             # ── Discord 알림: 녹화 시작 ──
             if self._discord_bot:
                 await self._discord_bot.send_notification(
                     title="🔴 녹화 시작",
-                    description=f"채널: **{channel_name or channel_id}**\n제목: {title or 'N/A'}",
+                    description=f"채널: **{channel_name or composite_key}**\n제목: {title or 'N/A'}",
                     color="green",
-                    fields={"화질": quality},
+                    fields={"화질": quality, "플랫폼": task.platform.value},
                 )
 
-            # ── 채팅 아카이빙 시작 (설정 활성화 시) ──
-            if settings.chat_archive_enabled:
+            # ── 채팅 아카이빙 시작 (Chzzk 전용) ──
+            if task.platform == Platform.CHZZK and settings.chat_archive_enabled:
                 try:
-                    # 녹화 파일과 같은 이름으로 .jsonl 저장 (예: [스트리머] 제목.ts → .jsonl)
                     recording_status = pipeline.get_status()
                     output_file = recording_status.get("output_path")
                     if output_file:
                         chat_file = Path(output_file).with_suffix(".jsonl")
                         archiver = ChatArchiver(
-                            channel_id=channel_id,
+                            channel_id=task.channel_id,
                             output_path=chat_file,
                             auth=self._auth,
                         )
                         await archiver.start()
                         task.chat_archiver = archiver
-                        logger.info(f"[{channel_id}] 채팅 아카이빙 시작: {chat_file}")
+                        logger.info(f"[{composite_key}] 채팅 아카이빙 시작: {chat_file}")
                 except Exception as e:
-                    logger.error(f"[{channel_id}] 채팅 아카이빙 시작 실패: {e}")
+                    logger.error(f"[{composite_key}] 채팅 아카이빙 시작 실패: {e}")
         except Exception as e:
-            logger.error(f"[{channel_id}] 녹화 시작 실패: {e}")
+            logger.error(f"[{composite_key}] 녹화 시작 실패: {e}")
 
-            # ── Discord 알림: 녹화 시작 실패 ──
             if self._discord_bot:
                 await self._discord_bot.send_notification(
                     title="❌ 녹화 시작 실패",
-                    description=f"채널: **{channel_name or channel_id}**\n오류: {str(e)}",
+                    description=f"채널: **{channel_name or composite_key}**\n오류: {str(e)}",
                     color="red",
                 )
 
-    async def start_manual_recording(self, channel_id: str) -> dict:
-        """수동으로 특정 채널의 녹화를 시작한다."""
-        task = self._channels.get(channel_id)
+    async def _start_spaces_recording(
+        self,
+        composite_key: str,
+        channel_name: Optional[str] = None,
+        title: Optional[str] = None,
+    ) -> None:
+        """Twitter Spaces를 yt-dlp subprocess로 녹화 시작한다."""
+        task = self._channels.get(composite_key)
         if task is None:
-            # 미등록 채널도 임시로 녹화 가능
-            task = ChannelTask(channel_id=channel_id, auto_record=False)
-            self._channels[channel_id] = task
+            return
+        if task._current_space_id is None:
+            logger.error(f"[{composite_key}] Space ID 없음. 녹화 불가.")
+            return
+
+        try:
+            from app.engine.twitter_spaces import TwitterSpacesEngine
+            engine: TwitterSpacesEngine = self._get_engine(Platform.TWITTER_SPACES)
+
+            settings = get_settings()
+            process = await engine.start_ytdlp_recording(
+                space_id=task._current_space_id,
+                output_dir=settings.download_dir,
+                channel_name=channel_name or task.channel_name or task.channel_id,
+                title=title or task.title,
+                cookie_file=settings.twitter_cookie_file,
+            )
+            task.spaces_process = process
+            logger.info(f"[{composite_key}] Twitter Spaces 녹화 시작 (space_id={task._current_space_id}).")
+
+            if self._discord_bot:
+                await self._discord_bot.send_notification(
+                    title="🔴 Spaces 녹화 시작",
+                    description=f"채널: **{channel_name or composite_key}**\n제목: {title or 'N/A'}",
+                    color="green",
+                    fields={"플랫폼": "Twitter Spaces"},
+                )
+        except Exception as e:
+            logger.error(f"[{composite_key}] Spaces 녹화 시작 실패: {e}")
+
+    async def _stop_spaces_recording(self, composite_key: str) -> None:
+        """Twitter Spaces yt-dlp 프로세스를 종료한다."""
+        task = self._channels.get(composite_key)
+        if task is None or task.spaces_process is None:
+            return
+
+        proc = task.spaces_process
+        try:
+            if proc.returncode is None:
+                proc.terminate()
+                try:
+                    await asyncio.wait_for(proc.wait(), timeout=10.0)
+                except asyncio.TimeoutError:
+                    proc.kill()
+            task.spaces_process = None
+            task._current_space_id = None
+            logger.info(f"[{composite_key}] Spaces 녹화 중지.")
+        except Exception as e:
+            logger.error(f"[{composite_key}] Spaces 녹화 중지 실패: {e}")
+
+    async def start_manual_recording(self, composite_key: str) -> dict:
+        """수동으로 특정 채널의 녹화를 시작한다."""
+        task = self._channels.get(composite_key)
+        if task is None:
+            # 미등록 채널 처리: 레거시 호환 (Chzzk 채널로 처리)
+            platform, channel_id = self.parse_composite_key(composite_key)
+            task = ChannelTask(
+                channel_id=channel_id,
+                platform=platform,
+                auto_record=False,
+            )
+            self._channels[composite_key] = task
 
         pipe = task.pipeline
         if pipe is not None and pipe.state == RecordingState.RECORDING:
@@ -402,37 +591,50 @@ class Conductor:
 
         # 수동 녹화 시에도 상태 정보 업데이트 시도
         try:
-            status = await self._engine.check_live_status(channel_id)
+            engine = self._get_engine(task.platform)
+            status = await engine.check_live_status(task.channel_id)
             task.channel_name = status.get("channel_name")
             task.title = status.get("title")
+            if task.platform == Platform.TWITTER_SPACES:
+                task._current_space_id = status.get("space_id")
         except Exception:
             pass
 
-        await self._start_recording(channel_id)
+        await self._start_recording(composite_key)
+
+        if task.platform == Platform.TWITTER_SPACES:
+            return {"message": "Spaces 녹화 시작됨.", "space_id": task._current_space_id}
 
         pipe = task.pipeline
         if pipe is not None:
             return pipe.get_status()
         return {"error": "녹화 시작 실패."}
 
-    async def stop_manual_recording(self, channel_id: str) -> dict:
+    async def stop_manual_recording(self, composite_key: str) -> dict:
         """수동으로 특정 채널의 녹화를 중지한다."""
-        task = self._channels.get(channel_id)
+        task = self._channels.get(composite_key)
         if task is None:
             return {"error": "녹화 중인 채널이 아닙니다."}
+
+        if task.platform == Platform.TWITTER_SPACES:
+            await self._stop_spaces_recording(composite_key)
+            return {"message": "Spaces 녹화 중지됨."}
+
         pipe = task.pipeline
         if pipe is None:
             return {"error": "녹화 중인 채널이 아닙니다."}
 
-        await self._stop_recording(channel_id)
+        await self._stop_recording(composite_key)
         return pipe.get_status()
 
     def get_all_status(self) -> list[dict]:
         """모든 채널의 상태를 반환한다."""
         result: list[dict] = []
-        for channel_id, task in self._channels.items():
+        for composite_key, task in self._channels.items():
             status: dict = {
-                "channel_id": channel_id,
+                "composite_key": composite_key,
+                "platform": task.platform.value,
+                "channel_id": task.channel_id,
                 "auto_record": task.auto_record,
                 "is_live": task.is_live,
                 "recording": None,
@@ -448,6 +650,13 @@ class Conductor:
             if pipe is not None:
                 status["recording"] = pipe.get_status()
 
+            if task.spaces_process is not None:
+                status["recording"] = {
+                    "state": "recording",
+                    "platform": "twitter_spaces",
+                    "space_id": task._current_space_id,
+                }
+
             archiver = task.chat_archiver
             if archiver is not None:
                 status["chat_archiving"] = archiver.get_status()
@@ -455,9 +664,9 @@ class Conductor:
             result.append(status)
         return result
 
-    # ── 라이브 이력 관리 ─────────────────────────────────
+    # ── 라이브 이력 관리 ─────────────────────────────────────
 
-    def _save_live_history(self, channel_id: str, task: ChannelTask, pipe_status: dict) -> None:
+    def _save_live_history(self, composite_key: str, task: ChannelTask, pipe_status: dict) -> None:
         """라이브 녹화 완료 이력을 JSON 파일에 저장한다."""
         try:
             self._live_history_path.parent.mkdir(parents=True, exist_ok=True)
@@ -467,8 +676,10 @@ class Conductor:
                     history = json.load(f)
 
             history.append({
-                "channel_id": channel_id,
-                "channel_name": task.channel_name or channel_id,
+                "composite_key": composite_key,
+                "platform": task.platform.value,
+                "channel_id": task.channel_id,
+                "channel_name": task.channel_name or task.channel_id,
                 "started_at": pipe_status.get("start_time"),
                 "ended_at": datetime.now().isoformat(),
                 "duration_seconds": pipe_status.get("duration_seconds", 0),
@@ -479,9 +690,9 @@ class Conductor:
             with open(self._live_history_path, "w", encoding="utf-8") as f:
                 json.dump(history, f, ensure_ascii=False, indent=2)
 
-            logger.debug(f"[{channel_id}] 라이브 이력 저장 완료.")
+            logger.debug(f"[{composite_key}] 라이브 이력 저장 완료.")
         except Exception as e:
-            logger.error(f"[{channel_id}] 라이브 이력 저장 실패: {e}")
+            logger.error(f"[{composite_key}] 라이브 이력 저장 실패: {e}")
 
     def get_live_history(self) -> list[dict]:
         """저장된 라이브 녹화 이력을 반환한다."""
@@ -497,10 +708,10 @@ class Conductor:
         """채널별 라이브 감지 횟수를 반환한다 (최근 30일 기준, 하루 1회 카운트).
 
         Returns:
-            { channel_id: 최근 30일 내 감지된 날짜 수 }
+            { composite_key: 최근 30일 내 감지된 날짜 수 }
         """
         cutoff = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
         return {
-            cid: sum(1 for d in dates if d >= cutoff)
-            for cid, dates in self._live_detections.items()
+            key: sum(1 for d in dates if d >= cutoff)
+            for key, dates in self._live_detections.items()
         }

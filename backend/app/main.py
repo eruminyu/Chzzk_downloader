@@ -32,6 +32,7 @@ from app.api.settings import router as settings_router
 from app.api.chat import router as chat_router
 from app.api.stats import router as stats_router
 from app.api.setup import router as setup_router
+from app.api.platforms import router as platforms_router
 
 # ── 전역 인스턴스 ────────────────────────────────────────
 _recorder_service: RecorderService | None = None
@@ -150,6 +151,7 @@ app.include_router(settings_router)
 app.include_router(chat_router)
 app.include_router(stats_router)
 app.include_router(setup_router)
+app.include_router(platforms_router)
 
 
 # ── 헬스 체크 ────────────────────────────────────────────

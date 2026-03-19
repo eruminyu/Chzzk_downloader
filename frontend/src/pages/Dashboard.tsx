@@ -1,14 +1,26 @@
 import { useState, useEffect, useRef } from "react";
-import { Plus, Trash2, Video, Radio, Play, Square, AlertCircle, Users, Eye, Loader2, WifiOff, MessageSquare } from "lucide-react";
-import { api, Channel } from "../api/client";
+import { Plus, Trash2, Video, Radio, Play, Square, AlertCircle, Users, Eye, Loader2, WifiOff, MessageSquare, ChevronDown, Lock } from "lucide-react";
+import { api, client, Channel, Platform, PlatformStatus, PLATFORM_LABELS } from "../api/client";
+// client를 직접 import해서 멀티 플랫폼 엔드포인트에 접근
+const client_raw = client;
 import { useToast } from "../components/ui/Toast";
 import { useConfirm } from "../components/ui/ConfirmModal";
 import { formatDuration, formatBytes } from "../utils/format";
 import { getErrorMessage } from "../utils/error";
 
+// 플랫폼별 배지 색상
+const PLATFORM_BADGE_STYLES: Record<Platform, string> = {
+    chzzk: "bg-purple-500/20 text-purple-300 border-purple-500/30",
+    twitcasting: "bg-orange-500/20 text-orange-300 border-orange-500/30",
+    twitter_spaces: "bg-cyan-500/20 text-cyan-300 border-cyan-500/30",
+};
+
 export default function Dashboard() {
     const [channels, setChannels] = useState<Channel[]>([]);
     const [newChannelId, setNewChannelId] = useState("");
+    const [selectedPlatform, setSelectedPlatform] = useState<Platform>("chzzk");
+    const [platformDropdownOpen, setPlatformDropdownOpen] = useState(false);
+    const [platformStatus, setPlatformStatus] = useState<PlatformStatus | null>(null);
     const [loading, setLoading] = useState(false);
     const [initialLoading, setInitialLoading] = useState(true);
     const [connectionError, setConnectionError] = useState(false);
@@ -17,13 +29,23 @@ export default function Dashboard() {
 
     useEffect(() => {
         fetchChannels().finally(() => setInitialLoading(false));
+        api.getPlatformStatus().then(setPlatformStatus).catch(() => {});
         const interval = setInterval(fetchChannels, 5000);
         return () => clearInterval(interval);
     }, []);
 
+    const isPlatformEnabled = (p: Platform): boolean => {
+        if (!platformStatus) return p === "chzzk";
+        if (p === "chzzk") return true;
+        if (p === "twitcasting") return platformStatus.twitcasting.enabled;
+        if (p === "twitter_spaces") return platformStatus.twitter_spaces.enabled;
+        return false;
+    };
+
     const fetchChannels = async () => {
         try {
-            const data = await api.getChannels();
+            // 멀티 플랫폼 엔드포인트 사용
+            const data = await client_raw.get<Channel[]>("/platforms/channels").then(r => r.data);
             setChannels(data);
             setConnectionError(false);
         } catch {
@@ -35,8 +57,13 @@ export default function Dashboard() {
         e.preventDefault();
         if (!newChannelId) return;
         setLoading(true);
+        setPlatformDropdownOpen(false);
         try {
-            await api.addChannel(newChannelId);
+            if (selectedPlatform === "chzzk") {
+                await api.addChannel(newChannelId);
+            } else {
+                await api.addPlatformChannel(selectedPlatform, newChannelId);
+            }
             setNewChannelId("");
             toast.success("채널이 추가되었습니다.");
             fetchChannels();
@@ -47,16 +74,22 @@ export default function Dashboard() {
         }
     };
 
-    const handleRemoveChannel = async (id: string, name?: string) => {
+    const handleRemoveChannel = async (channel: Channel) => {
+        const displayName = channel.channel_name || channel.channel_id;
         const ok = await confirm({
             title: "채널 제거",
-            message: `'${name || id}' 채널을 감시 목록에서 제거할까요?`,
+            message: `'${displayName}' 채널을 감시 목록에서 제거할까요?`,
             confirmText: "제거",
             variant: "danger",
         });
         if (!ok) return;
         try {
-            await api.removeChannel(id);
+            const platform = channel.platform || "chzzk";
+            if (platform === "chzzk") {
+                await api.removeChannel(channel.channel_id);
+            } else {
+                await api.removePlatformChannel(platform, channel.channel_id);
+            }
             toast.success("채널이 제거되었습니다.");
             fetchChannels();
         } catch {
@@ -66,11 +99,14 @@ export default function Dashboard() {
 
     const [actionLoading, setActionLoading] = useState<string | null>(null);
 
-    const handleStartRecord = async (id: string) => {
+    const getChannelKey = (channel: Channel) => channel.composite_key || channel.channel_id;
+
+    const handleStartRecord = async (channel: Channel) => {
+        const key = getChannelKey(channel);
         if (actionLoading) return;
-        setActionLoading(id);
+        setActionLoading(key);
         try {
-            await api.startRecording(id);
+            await api.startRecording(key);
             toast.success("녹화를 시작합니다.");
             fetchChannels();
         } catch (e: unknown) {
@@ -80,7 +116,8 @@ export default function Dashboard() {
         }
     };
 
-    const handleStopRecord = async (id: string) => {
+    const handleStopRecord = async (channel: Channel) => {
+        const key = getChannelKey(channel);
         if (actionLoading) return;
         const ok = await confirm({
             title: "녹화 중지",
@@ -89,9 +126,9 @@ export default function Dashboard() {
             variant: "danger",
         });
         if (!ok) return;
-        setActionLoading(id);
+        setActionLoading(key);
         try {
-            await api.stopRecording(id);
+            await api.stopRecording(key);
             toast.success("녹화가 중지되었습니다.");
             fetchChannels();
         } catch (e: unknown) {
@@ -101,9 +138,14 @@ export default function Dashboard() {
         }
     };
 
-    const handleToggleAutoRecord = async (id: string) => {
+    const handleToggleAutoRecord = async (channel: Channel) => {
+        const platform = channel.platform || "chzzk";
         try {
-            await api.toggleAutoRecord(id);
+            if (platform === "chzzk") {
+                await api.toggleAutoRecord(channel.channel_id);
+            } else {
+                await api.togglePlatformAutoRecord(platform, channel.channel_id);
+            }
             fetchChannels();
         } catch {
             toast.error("자동 녹화 설정 변경에 실패했습니다.");
@@ -137,11 +179,61 @@ export default function Dashboard() {
                 </div>
 
                 <form onSubmit={handleAddChannel} className="flex gap-2">
+                    {/* 플랫폼 드롭다운 */}
+                    <div className="relative">
+                        <button
+                            type="button"
+                            onClick={() => setPlatformDropdownOpen(!platformDropdownOpen)}
+                            className="h-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm flex items-center gap-1.5 hover:border-zinc-700 transition-colors"
+                        >
+                            <span className={`inline-block w-2 h-2 rounded-full ${
+                                selectedPlatform === "chzzk" ? "bg-purple-400" :
+                                selectedPlatform === "twitcasting" ? "bg-orange-400" : "bg-cyan-400"
+                            }`} />
+                            {PLATFORM_LABELS[selectedPlatform]}
+                            <ChevronDown className="w-3 h-3 text-zinc-500" />
+                        </button>
+                        {platformDropdownOpen && (
+                            <div className="absolute top-full mt-1 right-0 z-20 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl min-w-[180px] overflow-hidden">
+                                {(Object.keys(PLATFORM_LABELS) as Platform[]).map((p) => {
+                                    const enabled = isPlatformEnabled(p);
+                                    return (
+                                        <button
+                                            key={p}
+                                            type="button"
+                                            disabled={!enabled}
+                                            onClick={() => { if (enabled) { setSelectedPlatform(p); setPlatformDropdownOpen(false); } }}
+                                            className={`w-full text-left px-3 py-2 text-sm flex items-center gap-2 transition-colors ${
+                                                !enabled
+                                                    ? "text-zinc-600 cursor-not-allowed"
+                                                    : selectedPlatform === p
+                                                        ? "text-white hover:bg-zinc-800"
+                                                        : "text-zinc-400 hover:bg-zinc-800"
+                                            }`}
+                                        >
+                                            <span className={`inline-block w-2 h-2 rounded-full ${
+                                                !enabled ? "bg-zinc-700" :
+                                                p === "chzzk" ? "bg-purple-400" :
+                                                p === "twitcasting" ? "bg-orange-400" : "bg-cyan-400"
+                                            }`} />
+                                            <span className="flex-1">{PLATFORM_LABELS[p]}</span>
+                                            {!enabled && (
+                                                <span className="flex items-center gap-1 text-[10px] text-zinc-600">
+                                                    <Lock className="w-3 h-3" />
+                                                    설정 필요
+                                                </span>
+                                            )}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        )}
+                    </div>
                     <input
                         type="text"
                         value={newChannelId}
                         onChange={(e) => setNewChannelId(e.target.value)}
-                        placeholder="채널 ID 또는 URL..."
+                        placeholder={selectedPlatform === "chzzk" ? "채널 ID 또는 URL..." : "채널 ID..."}
                         className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-1 focus:ring-green-500"
                     />
                     <button
@@ -178,13 +270,13 @@ export default function Dashboard() {
 
                 {!initialLoading && channels?.map((channel) => (
                     <ChannelCard
-                        key={channel.channel_id}
+                        key={channel.composite_key || channel.channel_id}
                         channel={channel}
                         onStartRecord={handleStartRecord}
                         onStopRecord={handleStopRecord}
                         onRemove={handleRemoveChannel}
                         onToggleAutoRecord={handleToggleAutoRecord}
-                        isActionLoading={actionLoading === channel.channel_id}
+                        isActionLoading={actionLoading === (channel.composite_key || channel.channel_id)}
                     />
                 ))}
 
@@ -202,15 +294,16 @@ export default function Dashboard() {
 
 interface ChannelCardProps {
     channel: Channel;
-    onStartRecord: (id: string) => void;
-    onStopRecord: (id: string) => void;
-    onRemove: (id: string, name?: string) => void;
-    onToggleAutoRecord: (id: string) => void;
+    onStartRecord: (channel: Channel) => void;
+    onStopRecord: (channel: Channel) => void;
+    onRemove: (channel: Channel) => void;
+    onToggleAutoRecord: (channel: Channel) => void;
     isActionLoading: boolean;
 }
 
 function ChannelCard({ channel, onStartRecord, onStopRecord, onRemove, onToggleAutoRecord, isActionLoading }: ChannelCardProps) {
     const displayName = channel.channel_name || channel.channel_id;
+    const platform = channel.platform || "chzzk";
 
     // ── 로컬 1초 타이머: start_time 기준으로 경과 시간 직접 계산 ──
     const [localDuration, setLocalDuration] = useState(channel.recording?.duration_seconds ?? 0);
@@ -281,9 +374,16 @@ function ChannelCard({ channel, onStartRecord, onStopRecord, onRemove, onToggleA
                     </div>
                 )}
 
+                {/* 플랫폼 배지 */}
+                {platform !== "chzzk" && (
+                    <div className={`absolute bottom-2 left-2 text-[10px] font-bold px-2 py-0.5 rounded-sm border ${PLATFORM_BADGE_STYLES[platform]}`}>
+                        {PLATFORM_LABELS[platform]}
+                    </div>
+                )}
+
                 {/* 삭제 버튼 (hover) */}
                 <button
-                    onClick={() => onRemove(channel.channel_id, displayName)}
+                    onClick={() => onRemove(channel)}
                     className="absolute top-2 right-2 p-1.5 bg-black/50 backdrop-blur-sm hover:bg-red-500/80 text-zinc-400 hover:text-white rounded-lg transition-all opacity-0 group-hover:opacity-100"
                     title="채널 제거"
                 >
@@ -341,7 +441,7 @@ function ChannelCard({ channel, onStartRecord, onStopRecord, onRemove, onToggleA
                 <div className="flex items-center justify-between text-xs mb-3">
                     <span className="text-zinc-500">자동 녹화</span>
                     <button
-                        onClick={() => onToggleAutoRecord(channel.channel_id)}
+                        onClick={() => onToggleAutoRecord(channel)}
                         className={`relative w-9 h-5 rounded-full transition-colors duration-200 ${channel.auto_record ? 'bg-green-500' : 'bg-zinc-700'
                             }`}
                         title={channel.auto_record ? '자동 녹화 끄기' : '자동 녹화 켜기'}
@@ -361,7 +461,7 @@ function ChannelCard({ channel, onStartRecord, onStopRecord, onRemove, onToggleA
                                     녹화 중... ({formatDuration(localDuration)})
                                 </div>
                                 <button
-                                    onClick={() => onStopRecord(channel.channel_id)}
+                                    onClick={() => onStopRecord(channel)}
                                     disabled={isActionLoading}
                                     className="p-2 bg-zinc-800 hover:bg-red-600 text-red-400 hover:text-white rounded-lg border border-zinc-700 hover:border-red-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                                     title="녹화 중단"
@@ -405,7 +505,7 @@ function ChannelCard({ channel, onStartRecord, onStopRecord, onRemove, onToggleA
                         </div>
                     ) : channel.is_live ? (
                         <button
-                            onClick={() => onStartRecord(channel.channel_id)}
+                            onClick={() => onStartRecord(channel)}
                             disabled={isActionLoading}
                             className="w-full bg-zinc-800 hover:bg-zinc-700 text-green-400 border border-zinc-700 rounded-lg p-2 flex items-center justify-center gap-2 text-xs font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                         >

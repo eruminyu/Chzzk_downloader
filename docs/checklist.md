@@ -375,3 +375,47 @@
 - [x] `frontend/src/App.tsx`: `/setup/status` 응답의 `is_docker` 값을 `SetupWizard`에 전달
 - [x] `frontend/src/components/SetupWizard.tsx`: `isDocker` 여부에 따라 다운로드 경로 입력란의 **초기값(`/app/recordings`)**, **Placeholder**, **안내 문구**를 동적으로 변경하여 기본 매핑 폴더 사용을 유도
 - [x] 프론트엔드 TypeScript 빌드 검증 통과
+
+## 2026-03-19: 멀티 플랫폼 감시+녹화 확장 (TwitCasting + Twitter Spaces)
+
+### 백엔드 — 기반 공사
+- [x] `backend/app/engine/base.py` 신규: `Platform(str, Enum)`, `LiveStatus(TypedDict)`, `PlatformEngine(Protocol)` 정의
+- [x] `backend/app/core/config.py`: TwitCasting/Twitter Spaces 인증 설정 필드 4개 추가
+
+### 백엔드 — Conductor 멀티 플랫폼 대응
+- [x] `backend/app/engine/conductor.py` 전면 개편
+  - `ChannelTask`: `platform`, `spaces_process`, `_current_space_id` 필드 추가
+  - `_get_engine()`: 플랫폼별 엔진 지연 초기화 (Lazy Loading)
+  - `make_composite_key()`, `parse_composite_key()`: 복합 키 유틸리티
+  - `_load_persistence()`: 레거시 키 자동 마이그레이션 (`abc` → `chzzk:abc`)
+  - `_start_spaces_recording()`, `_stop_spaces_recording()`: Twitter Spaces 전용 경로
+
+### 백엔드 — 엔진 구현
+- [x] `backend/app/engine/twitcasting.py` 신규: TwitCasting API v2 + Streamlink 스트림 추출
+- [x] `backend/app/engine/twitter_spaces.py` 신규: Twitter API v2 + yt-dlp asyncio subprocess 녹화
+
+### 백엔드 — API & 서비스
+- [x] `backend/app/api/platforms.py` 신규: `/api/platforms` 라우터 (채널 관리 + 인증 설정)
+- [x] `backend/app/services/recorder.py`: `add_platform_channel()`, `remove_platform_channel()` 추가
+- [x] `backend/app/api/settings.py`: TwitCasting/Twitter 설정 여부 반환 (값 마스킹)
+- [x] `backend/app/main.py`: `platforms_router` 등록
+
+### 프론트엔드
+- [x] `frontend/src/api/client.ts`: `Platform` 타입, `Channel` 멀티 플랫폼 필드, 새 API 함수 6개
+- [x] `frontend/src/pages/Dashboard.tsx`: 플랫폼 드롭다운 + 플랫폼 배지 (보라/주황/하늘)
+- [x] `frontend/src/pages/Settings.tsx`: 6탭 구조로 전면 재편
+  - 「일반」「다운로드」「인증」「알림」「외관」「정보」 탭
+  - 인증 탭: Chzzk / TwitCasting / Twitter Spaces 3개 섹션
+
+### 문서
+- [x] `docs/plan-multiplatform-monitor.md` 작성
+- [x] `docs/done-multiplatform-monitor.md` 작성
+- [x] `docs/checklist.md` 업데이트
+
+
+## 2026-03-19: 멀티 플랫폼 — 설정 미완료 시 잠금 처리
+
+- [x] 백엔드: TwitCasting/Twitter Spaces 채널 추가 시 인증 설정 미완료 → 400 에러 반환 (`platforms.py`)
+- [x] 프론트: `/api/platforms/status` 로드 → 미설정 플랫폼 드롭다운 비활성화 (`Dashboard.tsx`)
+- [x] 프론트: 비활성 플랫폼 항목에 자물쇠 아이콘 + "설정 필요" 레이블 표시
+- [x] TypeScript 빌드 검증 통과
