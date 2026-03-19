@@ -9,6 +9,8 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from app.core.utils import extract_channel_id
+from app.engine.base import Platform
+from app.engine.conductor import Conductor
 
 router = APIRouter(prefix="/api/stream", tags=["Stream"])
 
@@ -63,9 +65,11 @@ async def toggle_auto_record(channel_id: str):
     service = get_recorder_service()
 
     channel_id = extract_channel_id(channel_id)
+    # 레거시 라우터는 순수 ID로 오므로 chzzk composite key로 변환
+    composite_key = Conductor.make_composite_key(Platform.CHZZK, channel_id)
 
     try:
-        return service.toggle_auto_record(channel_id)
+        return service.toggle_auto_record(composite_key)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
@@ -80,9 +84,10 @@ async def start_recording(channel_id: str):
     service = get_recorder_service()
 
     channel_id = extract_channel_id(channel_id)
+    composite_key = Conductor.make_composite_key(Platform.CHZZK, channel_id)
 
     try:
-        return await service.start_recording(channel_id)
+        return await service.start_recording(composite_key)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -95,9 +100,10 @@ async def stop_recording(channel_id: str):
     service = get_recorder_service()
 
     channel_id = extract_channel_id(channel_id)
+    composite_key = Conductor.make_composite_key(Platform.CHZZK, channel_id)
 
     try:
-        return await service.stop_recording(channel_id)
+        return await service.stop_recording(composite_key)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
