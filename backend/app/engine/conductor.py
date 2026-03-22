@@ -157,6 +157,15 @@ class Conductor:
                 self._monitor_channel(composite_key)
             )
 
+    def set_auto_record(self, composite_key: str, value: bool) -> None:
+        """채널의 자동 녹화 설정을 직접 지정한다."""
+        task = self._channels.get(composite_key)
+        if task is None:
+            raise ValueError(f"채널 '{composite_key}'을(를) 찾을 수 없습니다.")
+        task.auto_record = value
+        logger.info(f"[{composite_key}] 자동 녹화 {'ON' if value else 'OFF'}")
+        self._save_persistence()
+
     def toggle_auto_record(self, composite_key: str) -> bool:
         """채널의 자동 녹화 설정을 토글한다.
 

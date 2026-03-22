@@ -98,6 +98,19 @@ class RecorderService:
         logger.info(f"[Service] 녹화 중지 요청: {channel_id}")
         return await self._conductor.stop_manual_recording(channel_id)
 
+    async def start_channel(self, composite_key: str) -> dict:
+        """녹화 시작 + 자동 녹화 ON. Discord /start 전용."""
+        logger.info(f"[Service] 채널 시작 요청: {composite_key}")
+        self._conductor.set_auto_record(composite_key, True)
+        return await self._conductor.start_manual_recording(composite_key)
+
+    async def stop_channel(self, composite_key: str) -> dict:
+        """녹화 중지 + 자동 녹화 OFF. Discord /stop 전용."""
+        logger.info(f"[Service] 채널 중지 요청: {composite_key}")
+        result = await self._conductor.stop_manual_recording(composite_key)
+        self._conductor.set_auto_record(composite_key, False)
+        return result
+
     # ── Conductor 제어 ───────────────────────────────────
 
     async def start_monitoring(self) -> dict:

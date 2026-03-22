@@ -3,7 +3,7 @@ Chzzk-Recorder-Pro: Discord Bot 서비스
 User-Hosted Bot으로 원격에서 녹화 상태 확인 및 제어.
 
 사용자가 DISCORD_BOT_TOKEN을 설정에 입력하면 자동 구동된다.
-명령어: !status, !list, !record (프리픽스) + /status, /list, /record (슬래시)
+명령어: !status, !list, !start, !stop (프리픽스) + /status, /list, /start, /stop (슬래시)
 
 NOTE: discord.py 라이브러리가 필요합니다.
       requirements.txt에 discord.py 추가 필요.
@@ -71,9 +71,10 @@ class DiscordBotService:
     사용자가 직접 발급받은 BOT_TOKEN으로 구동한다.
 
     Commands (프리픽스 & 슬래시 동시 지원):
-        status  — 현재 녹화 상태 + 시스템 리소스
-        list    — 감시 중인 채널 목록
-        record on/off [channel_id] — 녹화 제어
+        status          — 현재 녹화 상태 + 시스템 리소스
+        list            — 감시 중인 채널 목록
+        start [channel_id] — 녹화 시작 + 자동 녹화 ON
+        stop  [channel_id] — 녹화 중지 + 자동 녹화 OFF
     """
 
     def __init__(self, recorder_service: RecorderService) -> None:
@@ -227,15 +228,16 @@ class DiscordBotService:
 
             lines: list[str] = []
             for ch in channels:
-                status = "🔴 LIVE" if ch["is_live"] else "⚫ OFF"
+                live_status = "🔴 LIVE" if ch["is_live"] else "⚫ OFF"
                 name = ch.get("channel_name") or ch["channel_id"]
+                channel_id = ch["channel_id"]
                 rec = ""
                 if ch.get("recording"):
                     rec_state = ch["recording"].get("state", "")
                     if rec_state == "recording":
                         dur = ch["recording"].get("duration_seconds", 0)
                         rec = f" | 🎬 녹화 중 ({dur:.0f}s)"
-                lines.append(f"{status} **{name}** {rec}")
+                lines.append(f"{live_status} **{name}** `({channel_id})`{rec}")
 
             embed = discord.Embed(
                 title="📋 채널 목록",
@@ -273,11 +275,11 @@ class DiscordBotService:
             else:
                 await ctx.send(embed=embed)
 
-        @bot.command(name="record")
-        async def cmd_record(ctx: commands.Context, action: str = "", channel_id: str = "") -> None:
-            """녹화 제어: !record on/off [channel_id]."""
-            if not action or not channel_id:
-                await ctx.send("❓ 사용법: `!record on <channel_id>` 또는 `!record off <channel_id>`")
+        @bot.command(name="start")
+        async def cmd_start(ctx: commands.Context, channel_id: str = "") -> None:
+            """녹화 시작 + 자동 녹화 ON: !start <channel_id>."""
+            if not channel_id:
+                await ctx.send("❓ 사용법: `!start <channel_id>`")
                 return
 
             ch = _find_channel(channel_id)
@@ -286,21 +288,33 @@ class DiscordBotService:
                 return
 
             display_name = ch.get("channel_name") or channel_id
+            composite_key = ch["composite_key"]
+            await self._service.start_channel(composite_key)
+            await ctx.send(embed=_make_embed("🎬 녹화 시작", f"**{display_name}**\n자동 녹화 ON", "green"))
 
-            if action.lower() == "on":
-                await self._service.start_recording(channel_id)
-                await ctx.send(embed=_make_embed("🎬 녹화 시작", f"**{display_name}**", "green"))
-            elif action.lower() == "off":
-                await self._service.stop_recording(channel_id)
-                await ctx.send(embed=_make_embed("⏹ 녹화 중지", f"**{display_name}**", "blue"))
-            else:
-                await ctx.send("❓ `on` 또는 `off`를 지정해주세요.")
+        @bot.command(name="stop")
+        async def cmd_stop(ctx: commands.Context, channel_id: str = "") -> None:
+            """녹화 중지 + 자동 녹화 OFF: !stop <channel_id>."""
+            if not channel_id:
+                await ctx.send("❓ 사용법: `!stop <channel_id>`")
+                return
+
+            ch = _find_channel(channel_id)
+            if ch is None:
+                await ctx.send(f"❌ 등록되지 않은 채널 ID입니다: `{channel_id}`")
+                return
+
+            display_name = ch.get("channel_name") or channel_id
+            composite_key = ch["composite_key"]
+            await self._service.stop_channel(composite_key)
+            await ctx.send(embed=_make_embed("⏹ 녹화 중지", f"**{display_name}**\n자동 녹화 OFF", "blue"))
 
         # ── 슬래시 커맨드 ────────────────────────────────────
 
         @bot.tree.command(name="status", description="현재 녹화 상태와 시스템 리소스를 확인합니다")
         async def slash_status(interaction: discord.Interaction) -> None:
-            await interaction.response.send_message(embed=_get_status_embed())
+            await interaction.response.defer()
+            await interaction.followup.send(embed=_get_status_embed())
 
         @bot.tree.command(name="list", description="감시 중인 채널 목록을 표시합니다")
         async def slash_list(interaction: discord.Interaction) -> None:
@@ -310,18 +324,10 @@ class DiscordBotService:
             else:
                 await interaction.response.send_message(embed=embed)
 
-        @bot.tree.command(name="record", description="채널 녹화를 시작하거나 중지합니다")
-        @app_commands.describe(
-            action="on: 녹화 시작 / off: 녹화 중지",
-            channel_id="감시 중인 채널 ID",
-        )
-        @app_commands.choices(action=[
-            app_commands.Choice(name="시작 (on)", value="on"),
-            app_commands.Choice(name="중지 (off)", value="off"),
-        ])
-        async def slash_record(
+        @bot.tree.command(name="start", description="채널 녹화를 시작하고 자동 녹화를 ON으로 설정합니다")
+        @app_commands.describe(channel_id="감시 중인 채널 ID (/list에서 확인)")
+        async def slash_start(
             interaction: discord.Interaction,
-            action: str,
             channel_id: str,
         ) -> None:
             ch = _find_channel(channel_id)
@@ -332,14 +338,32 @@ class DiscordBotService:
                 return
 
             display_name = ch.get("channel_name") or channel_id
+            composite_key = ch["composite_key"]
 
-            if action == "on":
-                await self._service.start_recording(channel_id)
+            await interaction.response.defer()
+            await self._service.start_channel(composite_key)
+            await interaction.followup.send(
+                embed=_make_embed("🎬 녹화 시작", f"**{display_name}**\n자동 녹화 ON", "green")
+            )
+
+        @bot.tree.command(name="stop", description="채널 녹화를 중지하고 자동 녹화를 OFF로 설정합니다")
+        @app_commands.describe(channel_id="감시 중인 채널 ID (/list에서 확인)")
+        async def slash_stop(
+            interaction: discord.Interaction,
+            channel_id: str,
+        ) -> None:
+            ch = _find_channel(channel_id)
+            if ch is None:
                 await interaction.response.send_message(
-                    embed=_make_embed("🎬 녹화 시작", f"**{display_name}**", "green")
+                    f"❌ 등록되지 않은 채널 ID입니다: `{channel_id}`", ephemeral=True
                 )
-            else:
-                await self._service.stop_recording(channel_id)
-                await interaction.response.send_message(
-                    embed=_make_embed("⏹ 녹화 중지", f"**{display_name}**", "blue")
-                )
+                return
+
+            display_name = ch.get("channel_name") or channel_id
+            composite_key = ch["composite_key"]
+
+            await interaction.response.defer()
+            await self._service.stop_channel(composite_key)
+            await interaction.followup.send(
+                embed=_make_embed("⏹ 녹화 중지", f"**{display_name}**\n자동 녹화 OFF", "blue")
+            )
