@@ -418,20 +418,24 @@ class Conductor:
             # ── Discord 알림: 녹화 완료 ──
             if self._discord_bot:
                 status = pipe.get_status()
-                duration = status.get("duration_seconds", 0)
+                duration = status.get("duration_seconds", 0) or 0
                 output_file = status.get("output_file", "N/A")
                 file_size = status.get("file_size_bytes", 0) / (1024 * 1024)
+                duration_str = f"{duration // 60:.0f}분 {duration % 60:.0f}초" if duration > 0 else "N/A"
 
-                await self._discord_bot.send_notification(
-                    title="⏹ 녹화 완료",
-                    description=f"채널: **{task.channel_name or composite_key}**",
-                    color="blue",
-                    fields={
-                        "녹화 시간": f"{duration // 60:.0f}분 {duration % 60:.0f}초",
-                        "파일 크기": f"{file_size:.1f} MB",
-                        "저장 경로": output_file,
-                    },
-                )
+                try:
+                    await self._discord_bot.send_notification(
+                        title="⏹ 녹화 완료",
+                        description=f"채널: **{task.channel_name or composite_key}**",
+                        color="blue",
+                        fields={
+                            "녹화 시간": duration_str,
+                            "파일 크기": f"{file_size:.1f} MB",
+                            "저장 경로": output_file,
+                        },
+                    )
+                except Exception as e:
+                    logger.error(f"[{composite_key}] Discord 녹화 완료 알림 전송 실패: {e}")
 
         # 녹화 완료 이력 저장
         if pipe is not None and pipe.state == RecordingState.COMPLETED:
@@ -479,12 +483,15 @@ class Conductor:
 
             # ── Discord 알림: 녹화 시작 ──
             if self._discord_bot:
-                await self._discord_bot.send_notification(
-                    title="🔴 녹화 시작",
-                    description=f"채널: **{channel_name or composite_key}**\n제목: {title or 'N/A'}",
-                    color="green",
-                    fields={"화질": quality, "플랫폼": task.platform.value},
-                )
+                try:
+                    await self._discord_bot.send_notification(
+                        title="🔴 녹화 시작",
+                        description=f"채널: **{channel_name or composite_key}**\n제목: {title or 'N/A'}",
+                        color="green",
+                        fields={"화질": quality, "플랫폼": task.platform.value},
+                    )
+                except Exception as e:
+                    logger.error(f"[{composite_key}] Discord 녹화 시작 알림 전송 실패: {e}")
 
             # ── 채팅 아카이빙 시작 (Chzzk 전용) ──
             if task.platform == Platform.CHZZK and settings.chat_archive_enabled:
@@ -507,11 +514,14 @@ class Conductor:
             logger.error(f"[{composite_key}] 녹화 시작 실패: {e}")
 
             if self._discord_bot:
-                await self._discord_bot.send_notification(
-                    title="❌ 녹화 시작 실패",
-                    description=f"채널: **{channel_name or composite_key}**\n오류: {str(e)}",
-                    color="red",
-                )
+                try:
+                    await self._discord_bot.send_notification(
+                        title="❌ 녹화 시작 실패",
+                        description=f"채널: **{channel_name or composite_key}**\n오류: {str(e)}",
+                        color="red",
+                    )
+                except Exception as notify_err:
+                    logger.error(f"[{composite_key}] Discord 녹화 실패 알림 전송 실패: {notify_err}")
 
     async def _start_spaces_recording(
         self,
@@ -543,12 +553,15 @@ class Conductor:
             logger.info(f"[{composite_key}] Twitter Spaces 녹화 시작 (space_id={task._current_space_id}).")
 
             if self._discord_bot:
-                await self._discord_bot.send_notification(
-                    title="🔴 Spaces 녹화 시작",
-                    description=f"채널: **{channel_name or composite_key}**\n제목: {title or 'N/A'}",
-                    color="green",
-                    fields={"플랫폼": "Twitter Spaces"},
-                )
+                try:
+                    await self._discord_bot.send_notification(
+                        title="🔴 Spaces 녹화 시작",
+                        description=f"채널: **{channel_name or composite_key}**\n제목: {title or 'N/A'}",
+                        color="green",
+                        fields={"플랫폼": "Twitter Spaces"},
+                    )
+                except Exception as e:
+                    logger.error(f"[{composite_key}] Discord Spaces 녹화 시작 알림 전송 실패: {e}")
         except Exception as e:
             logger.error(f"[{composite_key}] Spaces 녹화 시작 실패: {e}")
 

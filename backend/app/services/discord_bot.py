@@ -3,7 +3,7 @@ Chzzk-Recorder-Pro: Discord Bot 서비스
 User-Hosted Bot으로 원격에서 녹화 상태 확인 및 제어.
 
 사용자가 DISCORD_BOT_TOKEN을 설정에 입력하면 자동 구동된다.
-Phase 2 기준 기본 명령어: !status, !list, !record
+명령어: !status, !list, !record (프리픽스) + /status, /list, /record (슬래시)
 
 NOTE: discord.py 라이브러리가 필요합니다.
       requirements.txt에 discord.py 추가 필요.
@@ -24,11 +24,44 @@ if TYPE_CHECKING:
 # discord.py가 설치되어 있는지 확인
 try:
     import discord
+    from discord import app_commands
     from discord.ext import commands
 
     HAS_DISCORD = True
 except ImportError:
     HAS_DISCORD = False
+
+_RECONNECT_DELAY = 30  # 재연결 대기 시간 (초)
+_COLOR_MAP = {
+    "green": "green",
+    "red": "red",
+    "blue": "blue",
+    "yellow": "yellow",
+}
+
+
+def _make_embed(
+    title: str,
+    description: str = "",
+    color: str = "green",
+    fields: Optional[dict[str, str]] = None,
+) -> discord.Embed:
+    """공통 Embed 생성 헬퍼."""
+    color_map = {
+        "green": discord.Color.green(),
+        "red": discord.Color.red(),
+        "blue": discord.Color.blue(),
+        "yellow": discord.Color.yellow(),
+    }
+    embed = discord.Embed(
+        title=title,
+        description=description or "",
+        color=color_map.get(color, discord.Color.greyple()),
+    )
+    if fields:
+        for key, value in fields.items():
+            embed.add_field(name=key, value=value, inline=False)
+    return embed
 
 
 class DiscordBotService:
@@ -37,16 +70,17 @@ class DiscordBotService:
     치지직 녹화 상태를 외부에서 확인하고 제어한다.
     사용자가 직접 발급받은 BOT_TOKEN으로 구동한다.
 
-    Commands:
-        !status  — 현재 녹화 상태 + 시스템 리소스
-        !list    — 감시 중인 채널 목록
-        !record on/off [channel_id] — 녹화 제어
+    Commands (프리픽스 & 슬래시 동시 지원):
+        status  — 현재 녹화 상태 + 시스템 리소스
+        list    — 감시 중인 채널 목록
+        record on/off [channel_id] — 녹화 제어
     """
 
     def __init__(self, recorder_service: RecorderService) -> None:
         self._service = recorder_service
         self._bot: Optional[commands.Bot] = None
         self._task: Optional[asyncio.Task] = None
+        self._stopping = False
 
     async def start(self) -> None:
         """Discord Bot을 시작한다."""
@@ -64,24 +98,45 @@ class DiscordBotService:
             logger.info("Discord Bot 토큰이 설정되지 않았습니다. Bot을 건너뜁니다.")
             return
 
+        self._stopping = False
+        self._token = token
+        self._task = asyncio.create_task(self._run_with_reconnect(token))
+
+    async def _build_bot(self) -> commands.Bot:
+        """Bot 인스턴스를 생성하고 명령어를 등록한다."""
         intents = discord.Intents.default()
         intents.message_content = True
+        bot = commands.Bot(command_prefix="!", intents=intents)
+        self._bot = bot
+        self._register_commands(bot)
+        return bot
 
-        self._bot = commands.Bot(command_prefix="!", intents=intents)
-        self._register_commands()
-
-        logger.info("🤖 Discord Bot 시작 중...")
-        self._task = asyncio.create_task(self._run_bot(token))
-
-    async def _run_bot(self, token: str) -> None:
-        """Bot을 비동기로 실행한다."""
-        try:
-            await self._bot.start(token)  # type: ignore[union-attr]
-        except Exception as e:
-            logger.error(f"Discord Bot 오류: {e}")
+    async def _run_with_reconnect(self, token: str) -> None:
+        """연결 끊김 시 자동 재연결하며 Bot을 실행한다."""
+        while not self._stopping:
+            try:
+                bot = await self._build_bot()
+                logger.info("🤖 Discord Bot 시작 중...")
+                await bot.start(token)
+            except discord.LoginFailure:
+                logger.error("Discord Bot 로그인 실패: 토큰을 확인해주세요.")
+                break
+            except Exception as e:
+                if self._stopping:
+                    break
+                logger.error(f"Discord Bot 연결 끊김: {e}. {_RECONNECT_DELAY}초 후 재연결...")
+                await asyncio.sleep(_RECONNECT_DELAY)
+            finally:
+                if self._bot is not None and not self._bot.is_closed():
+                    try:
+                        await self._bot.close()
+                    except Exception:
+                        pass
 
     async def stop(self) -> None:
         """Discord Bot을 종료한다."""
+        self._stopping = True
+
         bot = self._bot
         if bot is not None and not bot.is_closed():
             await bot.close()
@@ -110,68 +165,44 @@ class DiscordBotService:
             return
 
         settings = get_settings()
-        channel_id = settings.discord_notification_channel_id
+        channel_id_str = settings.discord_notification_channel_id
 
-        if not channel_id or self._bot is None or not self._bot.is_ready():
+        if not channel_id_str or self._bot is None or not self._bot.is_ready():
             return
 
         try:
-            channel = self._bot.get_channel(int(channel_id))
+            channel_id = int(channel_id_str)
+        except ValueError:
+            logger.error(f"Discord 알림 채널 ID가 올바르지 않습니다: {channel_id_str!r}")
+            return
+
+        try:
+            channel = self._bot.get_channel(channel_id)
             if channel is None:
-                logger.warning(f"Discord 채널을 찾을 수 없습니다: {channel_id}")
+                logger.warning(f"Discord 채널을 찾을 수 없습니다: {channel_id_str}")
                 return
 
-            # 색상 매핑
-            color_map = {
-                "green": discord.Color.green(),
-                "red": discord.Color.red(),
-                "blue": discord.Color.blue(),
-                "yellow": discord.Color.yellow(),
-            }
-            embed_color = color_map.get(color, discord.Color.greyple())
-
-            embed = discord.Embed(
-                title=title,
-                description=description,
-                color=embed_color,
-            )
-
-            if fields:
-                for key, value in fields.items():
-                    embed.add_field(name=key, value=value, inline=False)
-
+            embed = _make_embed(title=title, description=description, color=color, fields=fields)
             await channel.send(embed=embed)  # type: ignore[union-attr]
             logger.debug(f"Discord 알림 전송 완료: {title}")
 
         except Exception as e:
             logger.error(f"Discord 알림 전송 실패: {e}")
 
-    def _register_commands(self) -> None:
-        """Bot 명령어를 등록한다."""
-        if self._bot is None:
-            return
+    def _register_commands(self, bot: commands.Bot) -> None:
+        """Bot 명령어를 등록한다 (프리픽스 + 슬래시)."""
 
-        bot: commands.Bot = self._bot
-        assert bot is not None  # type narrowing for Pyre2
+        # ── 공통 로직 헬퍼 ──────────────────────────────────
 
-        @bot.event
-        async def on_ready() -> None:
-            logger.info(f"🤖 Discord Bot 로그인: {bot.user}")
-
-        @bot.command(name="status")
-        async def cmd_status(ctx: commands.Context) -> None:
-            """현재 녹화 상태 + 시스템 리소스."""
+        def _get_status_embed() -> discord.Embed:
             channels = self._service.get_channels()
             recording_count = sum(
                 1
                 for ch in channels
                 if ch.get("recording") and ch["recording"].get("state") == "recording"
             )
-
-            # 시스템 리소스
             try:
                 import psutil
-
                 cpu = psutil.cpu_percent()
                 mem = psutil.virtual_memory().percent
                 disk = psutil.disk_usage("/").percent
@@ -186,49 +217,129 @@ class DiscordBotService:
             embed.add_field(name="감시 채널", value=str(len(channels)), inline=True)
             embed.add_field(name="녹화 중", value=str(recording_count), inline=True)
             embed.add_field(name="시스템", value=sys_info, inline=False)
+            return embed
 
-            await ctx.send(embed=embed)
-
-        @bot.command(name="list")
-        async def cmd_list(ctx: commands.Context) -> None:
-            """감시 중인 채널 목록."""
+        def _get_list_embed() -> tuple[discord.Embed | None, str | None]:
+            """(embed, error_message) 반환. 채널 없으면 embed=None."""
             channels = self._service.get_channels()
-
             if not channels:
-                await ctx.send("📭 등록된 채널이 없습니다.")
-                return
+                return None, "📭 등록된 채널이 없습니다."
 
             lines: list[str] = []
             for ch in channels:
                 status = "🔴 LIVE" if ch["is_live"] else "⚫ OFF"
+                name = ch.get("channel_name") or ch["channel_id"]
                 rec = ""
                 if ch.get("recording"):
                     rec_state = ch["recording"].get("state", "")
                     if rec_state == "recording":
                         dur = ch["recording"].get("duration_seconds", 0)
                         rec = f" | 🎬 녹화 중 ({dur:.0f}s)"
-                line = f"{status} `{ch['channel_id']}` {rec}"
-                lines.append(line)
+                lines.append(f"{status} **{name}** {rec}")
 
             embed = discord.Embed(
                 title="📋 채널 목록",
                 description="\n".join(lines),
                 color=discord.Color.blue(),
             )
-            await ctx.send(embed=embed)
+            return embed, None
+
+        def _find_channel(channel_id: str) -> dict | None:
+            for ch in self._service.get_channels():
+                if ch.get("channel_id") == channel_id:
+                    return ch
+            return None
+
+        # ── 프리픽스 명령어 ──────────────────────────────────
+
+        @bot.event
+        async def on_ready() -> None:
+            logger.info(f"🤖 Discord Bot 로그인: {bot.user}")
+            try:
+                synced = await bot.tree.sync()
+                logger.info(f"🤖 슬래시 커맨드 동기화 완료: {len(synced)}개")
+            except Exception as e:
+                logger.error(f"슬래시 커맨드 동기화 실패: {e}")
+
+        @bot.command(name="status")
+        async def cmd_status(ctx: commands.Context) -> None:
+            await ctx.send(embed=_get_status_embed())
+
+        @bot.command(name="list")
+        async def cmd_list(ctx: commands.Context) -> None:
+            embed, err = _get_list_embed()
+            if err:
+                await ctx.send(err)
+            else:
+                await ctx.send(embed=embed)
 
         @bot.command(name="record")
-        async def cmd_record(ctx: commands.Context, action: str = "", channel_id: str = ""):
+        async def cmd_record(ctx: commands.Context, action: str = "", channel_id: str = "") -> None:
             """녹화 제어: !record on/off [channel_id]."""
             if not action or not channel_id:
                 await ctx.send("❓ 사용법: `!record on <channel_id>` 또는 `!record off <channel_id>`")
                 return
 
+            ch = _find_channel(channel_id)
+            if ch is None:
+                await ctx.send(f"❌ 등록되지 않은 채널 ID입니다: `{channel_id}`")
+                return
+
+            display_name = ch.get("channel_name") or channel_id
+
             if action.lower() == "on":
-                result = await self._service.start_recording(channel_id)
-                await ctx.send(f"🎬 녹화 시작: `{channel_id}`\n```json\n{result}\n```")
+                await self._service.start_recording(channel_id)
+                await ctx.send(embed=_make_embed("🎬 녹화 시작", f"**{display_name}**", "green"))
             elif action.lower() == "off":
-                result = await self._service.stop_recording(channel_id)
-                await ctx.send(f"⏹ 녹화 중지: `{channel_id}`\n```json\n{result}\n```")
+                await self._service.stop_recording(channel_id)
+                await ctx.send(embed=_make_embed("⏹ 녹화 중지", f"**{display_name}**", "blue"))
             else:
                 await ctx.send("❓ `on` 또는 `off`를 지정해주세요.")
+
+        # ── 슬래시 커맨드 ────────────────────────────────────
+
+        @bot.tree.command(name="status", description="현재 녹화 상태와 시스템 리소스를 확인합니다")
+        async def slash_status(interaction: discord.Interaction) -> None:
+            await interaction.response.send_message(embed=_get_status_embed())
+
+        @bot.tree.command(name="list", description="감시 중인 채널 목록을 표시합니다")
+        async def slash_list(interaction: discord.Interaction) -> None:
+            embed, err = _get_list_embed()
+            if err:
+                await interaction.response.send_message(err)
+            else:
+                await interaction.response.send_message(embed=embed)
+
+        @bot.tree.command(name="record", description="채널 녹화를 시작하거나 중지합니다")
+        @app_commands.describe(
+            action="on: 녹화 시작 / off: 녹화 중지",
+            channel_id="감시 중인 채널 ID",
+        )
+        @app_commands.choices(action=[
+            app_commands.Choice(name="시작 (on)", value="on"),
+            app_commands.Choice(name="중지 (off)", value="off"),
+        ])
+        async def slash_record(
+            interaction: discord.Interaction,
+            action: str,
+            channel_id: str,
+        ) -> None:
+            ch = _find_channel(channel_id)
+            if ch is None:
+                await interaction.response.send_message(
+                    f"❌ 등록되지 않은 채널 ID입니다: `{channel_id}`", ephemeral=True
+                )
+                return
+
+            display_name = ch.get("channel_name") or channel_id
+
+            if action == "on":
+                await self._service.start_recording(channel_id)
+                await interaction.response.send_message(
+                    embed=_make_embed("🎬 녹화 시작", f"**{display_name}**", "green")
+                )
+            else:
+                await self._service.stop_recording(channel_id)
+                await interaction.response.send_message(
+                    embed=_make_embed("⏹ 녹화 중지", f"**{display_name}**", "blue")
+                )

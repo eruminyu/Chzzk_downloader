@@ -506,20 +506,26 @@ class VodEngine:
 
             # ── Discord 알림: VOD 다운로드 완료 ──
             if self._discord_bot:
-                file_size = output_file.stat().st_size / (1024 * 1024)
+                try:
+                    file_size = output_file.stat().st_size / (1024 * 1024)
+                except (FileNotFoundError, OSError):
+                    file_size = 0.0
                 duration = (task.completed_at - task.started_at).total_seconds() if task.started_at and task.completed_at else 0
 
-                await self._discord_bot.send_notification(
-                    title="📥 VOD 다운로드 완료",
-                    description=f"제목: **{task.title}**",
-                    color="green",
-                    fields={
-                        "화질": task.quality,
-                        "파일 크기": f"{file_size:.1f} MB",
-                        "다운로드 시간": f"{duration // 60:.0f}분 {duration % 60:.0f}초" if duration > 0 else "N/A",
-                        "저장 경로": str(output_file),
-                    },
-                )
+                try:
+                    await self._discord_bot.send_notification(
+                        title="📥 VOD 다운로드 완료",
+                        description=f"제목: **{task.title}**",
+                        color="green",
+                        fields={
+                            "화질": task.quality,
+                            "파일 크기": f"{file_size:.1f} MB",
+                            "다운로드 시간": f"{duration // 60:.0f}분 {duration % 60:.0f}초" if duration > 0 else "N/A",
+                            "저장 경로": str(output_file),
+                        },
+                    )
+                except Exception as e:
+                    logger.error(f"[{task_id}] Discord VOD 완료 알림 전송 실패: {e}")
         else:
             raise RuntimeError(f"FFmpeg 파이프라인 오류: {pipeline.state.value}")
 
@@ -704,20 +710,26 @@ class VodEngine:
             self._save_history()
 
             if self._discord_bot:
-                file_size = Path(filepath).stat().st_size / (1024 * 1024) if Path(filepath).exists() else 0
+                try:
+                    file_size = Path(filepath).stat().st_size / (1024 * 1024)
+                except (FileNotFoundError, OSError):
+                    file_size = 0.0
                 duration = (task.completed_at - task.started_at).total_seconds() if task.started_at and task.completed_at else 0
 
-                await self._discord_bot.send_notification(
-                    title="📥 VOD 다운로드 완료",
-                    description=f"제목: **{task.title}**",
-                    color="green",
-                    fields={
-                        "화질": task.quality,
-                        "파일 크기": f"{file_size:.1f} MB",
-                        "다운로드 시간": f"{duration // 60:.0f}분 {duration % 60:.0f}초" if duration > 0 else "N/A",
-                        "저장 경로": filepath,
-                    },
-                )
+                try:
+                    await self._discord_bot.send_notification(
+                        title="📥 VOD 다운로드 완료",
+                        description=f"제목: **{task.title}**",
+                        color="green",
+                        fields={
+                            "화질": task.quality,
+                            "파일 크기": f"{file_size:.1f} MB",
+                            "다운로드 시간": f"{duration // 60:.0f}분 {duration % 60:.0f}초" if duration > 0 else "N/A",
+                            "저장 경로": filepath,
+                        },
+                    )
+                except Exception as e:
+                    logger.error(f"[{task_id}] Discord 외부 VOD 완료 알림 전송 실패: {e}")
         else:
             task.state = VodDownloadState.ERROR
             task.error_message = "다운로드 결과를 확인할 수 없습니다."
