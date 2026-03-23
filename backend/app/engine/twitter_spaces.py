@@ -92,12 +92,15 @@ class TwitterSpacesEngine:
                 # 1단계: username → user_id
                 user_id = await _get_user_id(client, channel_id)
                 if user_id is None:
-                    logger.debug(f"[TwitterSpaces:{channel_id}] user_id 조회 실패.")
+                    logger.warning(f"[TwitterSpaces:{channel_id}] user_id 조회 실패.")
                     return self._offline_status(channel_id)
+
+                logger.info(f"[TwitterSpaces:{channel_id}] user_id 조회 성공: {user_id}")
 
                 # 2단계: 활성 Space 조회
                 space_info = await _get_active_space(client, user_id, channel_id)
                 if space_info is None:
+                    logger.info(f"[TwitterSpaces:{channel_id}] 활성 Space 없음 (오프라인).")
                     return self._offline_status(channel_id)
 
                 space_id = space_info["space_id"]
@@ -317,7 +320,7 @@ async def _get_user_id(client: httpx.AsyncClient, username: str) -> Optional[str
         user = data.get("data", {}).get("user", {}).get("result", {})
         return user.get("rest_id")
     except Exception as e:
-        logger.debug(f"UserByScreenName 조회 실패 ({username}): {e}")
+        logger.warning(f"UserByScreenName 조회 실패 ({username}): {e}")
         return None
 
 
@@ -387,11 +390,11 @@ async def _get_active_space(
         except httpx.HTTPStatusError:
             continue
         except Exception as e:
-            logger.debug(f"UserTweets 조회 실패 (qid={qid}): {e}")
+            logger.warning(f"UserTweets 조회 실패 (qid={qid}): {e}")
             continue
 
     # 타임라인 실패 시 AudioSpaceById로 직접 시도 (space_id를 모르면 불가, fallback 없음)
-    logger.debug(f"[TwitterSpaces:{username}] 모든 타임라인 쿼리 실패.")
+    logger.warning(f"[TwitterSpaces:{username}] 모든 타임라인 쿼리 실패.")
     return None
 
 
