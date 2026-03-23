@@ -97,10 +97,17 @@ print_done() {
   echo -e "${GREEN}${BOLD}║      🎉 업데이트가 완료되었습니다!         ║${NC}"
   echo -e "${GREEN}${BOLD}╚════════════════════════════════════════════╝${NC}"
   echo ""
+  # .env에서 PORT 읽기 (없으면 기본값 8000)
+  ENV_FILE="$INSTALL_DIR/.env"
+  PORT=8000
+  if [ -f "$ENV_FILE" ]; then
+    PARSED_PORT=$(grep -E '^PORT=' "$ENV_FILE" | head -1 | cut -d'=' -f2 | tr -d '[:space:]')
+    [ -n "$PARSED_PORT" ] && PORT="$PARSED_PORT"
+  fi
   LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
   echo -e "  ${BOLD}▶ 접속 주소:${NC}"
-  echo -e "    ${CYAN}http://localhost:8000${NC}"
-  [ -n "$LOCAL_IP" ] && echo -e "    ${CYAN}http://$LOCAL_IP:8000${NC}  (원격)"
+  echo -e "    ${CYAN}http://localhost:$PORT${NC}"
+  [ -n "$LOCAL_IP" ] && echo -e "    ${CYAN}http://$LOCAL_IP:$PORT${NC}  (원격)"
   echo ""
 }
 
