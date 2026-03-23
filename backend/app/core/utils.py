@@ -75,6 +75,7 @@ def extract_twitter_id(value: str) -> str:
     지원 형식:
         - https://x.com/someuser
         - https://twitter.com/someuser
+        - @someuser (@핸들)
         - someuser (순수 ID, 숫자 numeric ID도 그대로 통과)
     """
     value = value.strip().rstrip("/")
@@ -83,6 +84,8 @@ def extract_twitter_id(value: str) -> str:
             path = value.split(domain, 1)[1]
             value = path.split("/")[0].split("?")[0]
             break
+    # @핸들 처리
+    value = value.lstrip("@")
     return value
 
 
