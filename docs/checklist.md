@@ -461,3 +461,30 @@
 
 ### 문서
 - [x] `docs/plan-twitter-spaces-m3u8-capture.md`: 구현 계획 문서
+
+## 2026-03-24: 쿠키 만료 감지 + Discord 연동 강화
+
+### 백엔드
+- [x] `backend/app/engine/twitter_spaces.py`: `verify_cookie()` 비동기 함수 추가
+  - `GET /1.1/account/verify_credentials.json` 호출로 401 여부 판단
+  - 반환: `{"valid": bool, "checked_at": ISO8601, "reason": str | None}`
+- [x] `backend/app/engine/conductor.py`:
+  - `_COOKIE_CHECK_INTERVAL = 86400` 클래스 상수 추가
+  - `_cookie_status`, `_last_cookie_check`, `_cookie_check_task` 필드 추가
+  - `start()` 에서 `_cookie_check_loop()` 태스크 생성
+  - `stop()` 에서 `_cookie_check_task` 취소 추가
+  - `_cookie_check_loop()`: 1시간 wake-up, 24시간 경과 시 검증 실행
+  - `_check_twitter_cookie()`: 만료 감지 시 Discord 알림 (첫 전환 시에만 발송)
+  - `get_cookie_status()`: API용 상태 반환 메서드 추가
+  - m3u8 캡처 직후 Discord 알림 추가 (Space 종료 후 `/download-space` 안내 포함)
+- [x] `backend/app/services/discord_bot.py`:
+  - 프리픽스 커맨드 추가: `!spaces`, `!download-space <url>`
+  - 슬래시 커맨드 추가: `/spaces`, `/download-space url:<url>`
+  - 헬퍼: `_get_spaces_embed()`, `_do_download_space(url)`
+- [x] `backend/app/api/settings.py`:
+  - `GET /api/settings/cookie-status`: 최근 쿠키 검증 결과 반환
+  - `POST /api/settings/cookie-status/check`: 즉시 검증 트리거
+
+### 문서
+- [x] `docs/plan-cookie-validator-discord.md`: 구현 계획 문서
+- [x] `docs/done-cookie-validator-discord.md`: 구현 완료 문서

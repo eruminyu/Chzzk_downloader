@@ -367,3 +367,88 @@ class DiscordBotService:
             await interaction.followup.send(
                 embed=_make_embed("⏹ 녹화 중지", f"**{display_name}**\n자동 녹화 OFF", "blue")
             )
+
+        # ── Twitter Spaces 전용 커맨드 ────────────────────────────
+
+        @bot.command(name="spaces")
+        async def cmd_spaces(ctx: commands.Context) -> None:
+            """캡처된 Twitter Spaces m3u8 목록: !spaces."""
+            embed, err = _get_spaces_embed()
+            if err:
+                await ctx.send(err)
+            else:
+                await ctx.send(embed=embed)
+
+        @bot.command(name="download-space")
+        async def cmd_download_space(ctx: commands.Context, *, url: str = "") -> None:
+            """Twitter Spaces m3u8 URL 다운로드: !download-space <url>."""
+            if not url:
+                await ctx.send("❓ 사용법: `!download-space <m3u8_url>`")
+                return
+            await ctx.send(embed=await _do_download_space(url))
+
+        @bot.tree.command(name="spaces", description="캡처된 Twitter Spaces m3u8 URL 목록을 표시합니다")
+        async def slash_spaces(interaction: discord.Interaction) -> None:
+            embed, err = _get_spaces_embed()
+            if err:
+                await interaction.response.send_message(err)
+            else:
+                await interaction.response.send_message(embed=embed)
+
+        @bot.tree.command(name="download-space", description="Twitter Spaces m3u8 URL로 다운로드를 시작합니다")
+        @app_commands.describe(url="m3u8 URL (캡처된 URL 또는 직접 입력)")
+        async def slash_download_space(
+            interaction: discord.Interaction,
+            url: str,
+        ) -> None:
+            await interaction.response.defer()
+            embed = await _do_download_space(url)
+            await interaction.followup.send(embed=embed)
+
+        # ── Spaces 헬퍼 ──────────────────────────────────────────
+
+        def _get_spaces_embed() -> tuple[discord.Embed | None, str | None]:
+            """캡처된 m3u8 목록 Embed를 반환한다."""
+            channels = self._service.get_channels()
+            spaces = [
+                ch for ch in channels
+                if ch.get("platform") == "twitter_spaces" and ch.get("captured_m3u8_url")
+            ]
+            if not spaces:
+                return None, "📭 캡처된 Twitter Spaces m3u8 URL이 없습니다."
+
+            embed = discord.Embed(
+                title="🎙️ 캡처된 Twitter Spaces",
+                color=discord.Color.blue(),
+            )
+            for sp in spaces:
+                name = sp.get("channel_name") or sp["channel_id"]
+                title = sp.get("title") or "제목 없음"
+                captured_at = sp.get("captured_m3u8_at", "")[:19].replace("T", " ") if sp.get("captured_m3u8_at") else "N/A"
+                embed.add_field(
+                    name=f"@{name} — {title}",
+                    value=(
+                        f"캡처 시각: `{captured_at}`\n"
+                        f"URL: `{sp['captured_m3u8_url']}`\n"
+                        f"다운로드: `/download-space url:<위 URL>`"
+                    ),
+                    inline=False,
+                )
+            return embed, None
+
+        async def _do_download_space(url: str) -> discord.Embed:
+            """m3u8 URL로 다운로드를 시작하고 결과 Embed를 반환한다."""
+            try:
+                task_id = await self._service.download_vod(url=url)
+                return _make_embed(
+                    "⬇️ 다운로드 시작",
+                    f"Twitter Spaces 다운로드가 시작되었습니다.",
+                    "green",
+                    fields={"task_id": str(task_id), "URL": url[:100]},
+                )
+            except Exception as e:
+                return _make_embed(
+                    "❌ 다운로드 실패",
+                    f"오류: {str(e)[:200]}",
+                    "red",
+                )

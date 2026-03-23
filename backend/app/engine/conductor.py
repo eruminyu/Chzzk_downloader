@@ -68,6 +68,9 @@ class Conductor:
         - 방송 종료 감지 시 녹화 중지
     """
 
+    # 쿠키 검증 주기 (초) — 하루 1회
+    _COOKIE_CHECK_INTERVAL = 86400
+
     def __init__(
         self,
         auth: Optional[AuthManager] = None,
@@ -84,6 +87,10 @@ class Conductor:
         # 라이브 감지 이력: composite_key → 날짜 문자열 set (하루 1회 카운트)
         self._live_detections: dict[str, set[str]] = {}
         self._live_history_path = Path("data/live_history.json")
+        # Twitter 쿠키 유효성 상태
+        self._cookie_status: dict = {"valid": True, "checked_at": None, "reason": None}
+        self._last_cookie_check: Optional[datetime] = None
+        self._cookie_check_task: Optional[asyncio.Task] = None
         self._load_persistence()
 
     def _get_engine(self, platform: Platform):
@@ -223,6 +230,9 @@ class Conductor:
                 self._monitor_channel(composite_key)
             )
 
+        # 쿠키 검증 루프 시작
+        self._cookie_check_task = asyncio.create_task(self._cookie_check_loop())
+
     async def stop(self) -> None:
         """모든 감시 및 녹화를 중지한다."""
         self._running = False
@@ -240,7 +250,81 @@ class Conductor:
             if mt is not None and not mt.done():
                 mt.cancel()
 
+        if self._cookie_check_task is not None and not self._cookie_check_task.done():
+            self._cookie_check_task.cancel()
+
         logger.info("Conductor 종료 완료.")
+
+    async def _cookie_check_loop(self) -> None:
+        """Twitter 쿠키 유효성을 하루 1회 주기로 검증한다."""
+        while self._running:
+            try:
+                # 마지막 검증 이후 24시간이 지났을 때만 실행
+                now = datetime.now()
+                if (
+                    self._last_cookie_check is None
+                    or (now - self._last_cookie_check).total_seconds() >= self._COOKIE_CHECK_INTERVAL
+                ):
+                    await self._check_twitter_cookie()
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"쿠키 검증 루프 오류: {e}")
+
+            # 1시간마다 깨어나서 24시간 경과 여부 확인
+            await asyncio.sleep(3600)
+
+    async def _check_twitter_cookie(self) -> None:
+        """Twitter 쿠키 유효성을 검증하고 만료 시 Discord 알림을 전송한다."""
+        from app.engine.twitter_spaces import verify_cookie
+
+        settings = get_settings()
+        cookie_file = settings.twitter_cookie_file
+
+        # Twitter Spaces 채널이 없으면 검증 생략
+        has_spaces = any(
+            t.platform == Platform.TWITTER_SPACES for t in self._channels.values()
+        )
+        if not has_spaces:
+            return
+
+        if not cookie_file:
+            self._cookie_status = {
+                "valid": False,
+                "checked_at": datetime.now().isoformat(),
+                "reason": "쿠키 파일 경로가 설정되지 않았습니다.",
+            }
+            self._last_cookie_check = datetime.now()
+            return
+
+        logger.info("Twitter 쿠키 유효성 검증 중...")
+        result = await verify_cookie(cookie_file)
+        prev_valid = self._cookie_status.get("valid", True)
+        self._cookie_status = result
+        self._last_cookie_check = datetime.now()
+
+        if not result["valid"]:
+            logger.warning(f"Twitter 쿠키 만료 감지: {result.get('reason')}")
+            # 이전에 유효했거나 처음 감지된 경우에만 Discord 알림 (반복 알림 방지)
+            if prev_valid and self._discord_bot:
+                try:
+                    await self._discord_bot.send_notification(
+                        title="⚠️ Twitter 쿠키 만료",
+                        description=(
+                            "Twitter Spaces 쿠키가 만료되었습니다.\n"
+                            "설정 페이지에서 쿠키 파일을 갱신해주세요."
+                        ),
+                        color="red",
+                        fields={"이유": result.get("reason") or "알 수 없음"},
+                    )
+                except Exception as e:
+                    logger.error(f"쿠키 만료 Discord 알림 전송 실패: {e}")
+        else:
+            logger.info("Twitter 쿠키 유효성 확인 완료: 정상")
+
+    def get_cookie_status(self) -> dict:
+        """Twitter 쿠키 유효성 상태를 반환한다."""
+        return dict(self._cookie_status)
 
     def _save_persistence(self) -> None:
         """채널 목록을 파일에 저장한다."""
@@ -349,6 +433,25 @@ class Conductor:
                             f"(space_id={task._current_space_id})"
                         )
                         self._save_persistence()
+                        # Discord 알림: m3u8 캡처
+                        if self._discord_bot:
+                            try:
+                                await self._discord_bot.send_notification(
+                                    title="🎙️ Twitter Spaces m3u8 캡처",
+                                    description=(
+                                        f"**{task.channel_name or task.channel_id}**의 "
+                                        f"Space m3u8 URL이 캡처되었습니다.\n"
+                                        f"Space 종료 후 `/download-space` 커맨드로 다운로드하세요."
+                                    ),
+                                    color="blue",
+                                    fields={
+                                        "채널": task.channel_name or task.channel_id,
+                                        "제목": task.title or "N/A",
+                                        "m3u8 URL": new_m3u8,
+                                    },
+                                )
+                            except Exception as e:
+                                logger.error(f"[{composite_key}] m3u8 캡처 Discord 알림 전송 실패: {e}")
 
                 # ── 라이브 감지 날짜 기록 (하루 1회, 날짜 경계 자동 처리) ──
                 if status["is_live"]:

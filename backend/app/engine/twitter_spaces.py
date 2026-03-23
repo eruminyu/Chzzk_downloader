@@ -501,3 +501,72 @@ def _sanitize_filename(name: str) -> str:
     for ch in invalid:
         name = name.replace(ch, "_")
     return name.strip()[:50]
+
+
+async def verify_cookie(cookie_file: str) -> dict:
+    """쿠키 파일의 auth_token/ct0로 Twitter 인증 유효성을 확인한다.
+
+    Twitter API verify_credentials 엔드포인트를 호출하여 쿠키 만료 여부를 판단한다.
+
+    Args:
+        cookie_file: Netscape 형식 쿠키 파일 경로.
+
+    Returns:
+        {"valid": bool, "checked_at": ISO8601 str, "reason": str | None}
+    """
+    checked_at = datetime.now().isoformat()
+
+    if not cookie_file or not Path(cookie_file).is_file():
+        return {
+            "valid": False,
+            "checked_at": checked_at,
+            "reason": f"쿠키 파일을 찾을 수 없습니다: {cookie_file}",
+        }
+
+    cookies = _parse_netscape_cookies(cookie_file)
+    if not cookies.get("auth_token") or not cookies.get("ct0"):
+        return {
+            "valid": False,
+            "checked_at": checked_at,
+            "reason": "쿠키 파일에서 auth_token/ct0를 찾을 수 없습니다.",
+        }
+
+    headers = _build_headers(cookies["ct0"])
+
+    try:
+        async with httpx.AsyncClient(
+            cookies=cookies,
+            headers=headers,
+            timeout=10.0,
+            follow_redirects=True,
+        ) as client:
+            resp = await client.get(
+                "https://api.twitter.com/1.1/account/verify_credentials.json",
+                params={"skip_status": "true", "include_entities": "false"},
+            )
+            if resp.status_code == 200:
+                return {"valid": True, "checked_at": checked_at, "reason": None}
+            elif resp.status_code == 401:
+                return {
+                    "valid": False,
+                    "checked_at": checked_at,
+                    "reason": "쿠키가 만료되었습니다. 브라우저에서 쿠키를 다시 추출해주세요.",
+                }
+            else:
+                return {
+                    "valid": False,
+                    "checked_at": checked_at,
+                    "reason": f"Twitter API 응답 오류 (HTTP {resp.status_code})",
+                }
+    except httpx.RequestError as e:
+        return {
+            "valid": False,
+            "checked_at": checked_at,
+            "reason": f"네트워크 오류: {e}",
+        }
+    except Exception as e:
+        return {
+            "valid": False,
+            "checked_at": checked_at,
+            "reason": f"예상치 못한 오류: {e}",
+        }
