@@ -81,9 +81,10 @@ class ChatArchiver:
             await self._save_message(message)
 
         @self._client.event
-        async def on_client_error(error: Exception):
+        async def on_client_error(*args):
             """채팅 클라이언트 에러 발생 시"""
-            logger.error(f"[ChatArchiver] 채팅 에러: {error}", exc_info=error)
+            error = args[0] if args else None
+            logger.error(f"[ChatArchiver] 채팅 에러: {error}", exc_info=error if isinstance(error, BaseException) else None)
 
         # 비동기 태스크로 연결 시작
         self._is_running = True

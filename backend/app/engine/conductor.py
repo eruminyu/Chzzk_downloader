@@ -403,8 +403,8 @@ class Conductor:
 
             except asyncio.CancelledError:
                 break
-            except Exception as e:
-                logger.error(f"[{composite_key}] 감시 오류: {e}")
+            except BaseException as e:
+                logger.error(f"[{composite_key}] 감시 오류: {e}", exc_info=e)
 
             await asyncio.sleep(interval)
 
