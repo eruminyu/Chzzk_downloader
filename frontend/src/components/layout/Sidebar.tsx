@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { NavLink } from "react-router-dom";
-import { LayoutDashboard, Download, Settings, Tv, Menu, X, MessageSquare, BarChart2 } from "lucide-react";
+import { LayoutDashboard, Download, Settings, Tv, Menu, X, MessageSquare, BarChart2, Archive } from "lucide-react";
 import { clsx } from "clsx";
 import { useTheme } from "../../context/ThemeContext";
 
@@ -11,6 +11,7 @@ export function Sidebar() {
     const navItems = [
         { name: "Live Dashboard", to: "/", icon: LayoutDashboard },
         { name: "VOD Downloader", to: "/vod", icon: Download },
+        { name: "Archive", to: "/archive", icon: Archive },
         { name: "Chat Logs", to: "/chat", icon: MessageSquare },
         { name: "Statistics", to: "/stats", icon: BarChart2 },
         { name: "Settings", to: "/settings", icon: Settings },

@@ -7,6 +7,7 @@ import { SetupWizard } from "./components/SetupWizard";
 import { ThemeProvider } from "./context/ThemeContext";
 import Dashboard from "./pages/Dashboard";
 import VodDownload from "./pages/VodDownload";
+import ArchivePage from "./pages/Archive";
 import Settings from "./pages/Settings";
 import ChatLogs from "./pages/ChatLogs";
 import Stats from "./pages/Stats";
@@ -46,6 +47,7 @@ function App() {
                             <Route path="/" element={<Layout />}>
                                 <Route index element={<Dashboard />} />
                                 <Route path="vod" element={<VodDownload />} />
+                                <Route path="archive" element={<ArchivePage />} />
                                 <Route path="chat" element={<ChatLogs />} />
                                 <Route path="stats" element={<Stats />} />
                                 <Route path="settings" element={<Settings />} />

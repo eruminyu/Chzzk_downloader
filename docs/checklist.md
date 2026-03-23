@@ -419,3 +419,20 @@
 - [x] 프론트: `/api/platforms/status` 로드 → 미설정 플랫폼 드롭다운 비활성화 (`Dashboard.tsx`)
 - [x] 프론트: 비활성 플랫폼 항목에 자물쇠 아이콘 + "설정 필요" 레이블 표시
 - [x] TypeScript 빌드 검증 통과
+
+## 2026-03-23: 아카이브 다운로드 기능 + 멀티플랫폼 테스트 가이드
+
+### 백엔드
+- [x] `backend/app/engine/twitcasting.py`: `get_movie_list()` 메서드 추가 (TwitCasting API v2 `GET /users/{id}/movies`)
+- [x] `backend/app/api/archive.py`: 신규 — `GET /api/archive/twitcasting/{channel_id}`, `POST /api/archive/download`
+- [x] `backend/app/main.py`: archive 라우터 등록
+
+### 프론트엔드
+- [x] `frontend/src/pages/Archive.tsx`: 신규 — TwitCasting 아카이브 목록 UI + Twitter Spaces URL 입력
+- [x] `frontend/src/App.tsx`: `/archive` 라우트 추가
+- [x] `frontend/src/components/layout/Sidebar.tsx`: Archive 메뉴 항목 추가
+
+### 문서
+- [x] `docs/plan-multiplatform-test-guide.md`: TwitCasting/Twitter Spaces 라이브 감지 테스트 가이드
+- [x] `docs/plan-archive-download.md`: 아카이브 다운로드 계획 문서
+- [x] `docs/done-archive-download.md`: 아카이브 다운로드 완료 문서

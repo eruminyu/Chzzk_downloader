@@ -95,6 +95,66 @@ class TwitcastingEngine:
             profile_image_url=broadcaster.get("image") or "",
         )
 
+    async def get_movie_list(
+        self,
+        channel_id: str,
+        offset: int = 0,
+        limit: int = 20,
+    ) -> dict:
+        """TwitCasting API v2로 채널의 과거 방송 목록을 조회한다.
+
+        Args:
+            channel_id: TwitCasting 사용자 ID
+            offset: 페이지 오프셋 (0~1000)
+            limit: 한 번에 가져올 개수 (1~50)
+
+        Returns:
+            {total_count, movies: [{id, title, duration, created_at,
+             thumbnail_url, view_count, archive_url}]}
+        """
+        url = f"{TWITCASTING_API_BASE}/users/{channel_id}/movies"
+        headers = {
+            "Accept": "application/json",
+            **self._get_auth_header(),
+        }
+        params = {"offset": offset, "limit": min(limit, 50)}
+
+        async with httpx.AsyncClient() as client:
+            try:
+                resp = await client.get(url, headers=headers, params=params, timeout=10.0)
+            except httpx.RequestError as e:
+                logger.error(f"[TwitCasting:{channel_id}] 아카이브 목록 요청 실패: {e}")
+                raise RuntimeError(f"API 요청 실패: {e}") from e
+
+        if resp.status_code == 401:
+            raise PermissionError("TwitCasting 인증 실패: Client ID/Secret을 확인하세요.")
+        if resp.status_code == 404:
+            raise ValueError(f"채널을 찾을 수 없습니다: {channel_id}")
+        if resp.status_code != 200:
+            raise RuntimeError(f"TwitCasting API 오류: HTTP {resp.status_code}")
+
+        data = resp.json()
+        total_count = data.get("total_count", 0)
+        raw_movies = data.get("movies", [])
+
+        movies = []
+        for item in raw_movies:
+            movie = item.get("movie") or {}
+            broadcaster = item.get("broadcaster") or {}
+            movie_id = movie.get("id", "")
+            movies.append({
+                "id": movie_id,
+                "title": movie.get("title", ""),
+                "duration": movie.get("duration", 0),
+                "created_at": movie.get("created", 0),
+                "thumbnail_url": movie.get("large_thumbnail", "") or "",
+                "view_count": movie.get("total_view_count", 0),
+                "channel_name": broadcaster.get("screen_id") or broadcaster.get("name") or channel_id,
+                "archive_url": f"https://twitcasting.tv/{channel_id}/movie/{movie_id}",
+            })
+
+        return {"total_count": total_count, "movies": movies}
+
     def get_stream(self, channel_id: str, quality: str = "best") -> streamlink.Stream:
         """Streamlink twitcasting.tv 플러그인으로 스트림 객체를 반환한다.
 
