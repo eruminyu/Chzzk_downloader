@@ -189,6 +189,19 @@ class Conductor:
         task.auto_record = not task.auto_record
         logger.info(f"[{composite_key}] 자동 녹화 {'ON' if task.auto_record else 'OFF'}")
         self._save_persistence()
+
+        # 이미 라이브 중인데 auto_record를 ON으로 켰고 녹화가 안 되고 있으면 즉시 시작
+        if (
+            task.auto_record
+            and task.is_live
+            and task.platform != Platform.TWITTER_SPACES
+            and (task.pipeline is None or task.pipeline.state != RecordingState.RECORDING)
+        ):
+            logger.info(f"[{composite_key}] 라이브 중 자동 녹화 ON → 즉시 녹화 시작")
+            asyncio.create_task(
+                self._start_recording(composite_key, channel_name=task.channel_name, title=task.title)
+            )
+
         return task.auto_record
 
     async def remove_channel(self, composite_key: str) -> None:
