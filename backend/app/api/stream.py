@@ -15,6 +15,22 @@ from app.engine.conductor import Conductor
 router = APIRouter(prefix="/api/stream", tags=["Stream"])
 
 
+def _to_composite_key(raw: str) -> str:
+    """URL 경로에서 받은 channel_id를 composite_key로 변환한다.
+
+    - 이미 'platform:channel_id' 형식이면 그대로 반환 (멀티플랫폼 키)
+    - ':' 없는 레거시 순수 ID면 chzzk composite_key로 감싼다
+    - chzzk URL 형식도 extract_channel_id로 ID만 추출 후 chzzk 키로 변환
+    """
+    # 알려진 플랫폼 접두사가 있으면 composite_key로 간주
+    for prefix in ("chzzk:", "twitcasting:", "twitter_spaces:"):
+        if raw.startswith(prefix):
+            return raw
+    # 레거시: 순수 chzzk ID 또는 chzzk URL
+    channel_id = extract_channel_id(raw)
+    return Conductor.make_composite_key(Platform.CHZZK, channel_id)
+
+
 # ── 요청 스키마 ──────────────────────────────────────────
 
 class AddChannelRequest(BaseModel):
@@ -83,8 +99,8 @@ async def start_recording(channel_id: str):
 
     service = get_recorder_service()
 
-    channel_id = extract_channel_id(channel_id)
-    composite_key = Conductor.make_composite_key(Platform.CHZZK, channel_id)
+    # composite_key 형식(platform:id)이면 그대로 사용, 레거시 순수 ID면 chzzk으로 처리
+    composite_key = _to_composite_key(channel_id)
 
     try:
         return await service.start_recording(composite_key)
@@ -99,8 +115,8 @@ async def stop_recording(channel_id: str):
 
     service = get_recorder_service()
 
-    channel_id = extract_channel_id(channel_id)
-    composite_key = Conductor.make_composite_key(Platform.CHZZK, channel_id)
+    # composite_key 형식(platform:id)이면 그대로 사용, 레거시 순수 ID면 chzzk으로 처리
+    composite_key = _to_composite_key(channel_id)
 
     try:
         return await service.stop_recording(composite_key)
