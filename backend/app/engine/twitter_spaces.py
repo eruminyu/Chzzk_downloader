@@ -387,7 +387,8 @@ async def _get_active_space(
                 return space_info
             # 응답은 왔지만 Space 없음 → 오프라인
             return None
-        except httpx.HTTPStatusError:
+        except httpx.HTTPStatusError as e:
+            logger.warning(f"UserTweets HTTP 오류 (qid={qid}): {e.response.status_code} — {e.response.text[:200]}")
             continue
         except Exception as e:
             logger.warning(f"UserTweets 조회 실패 (qid={qid}): {e}")
