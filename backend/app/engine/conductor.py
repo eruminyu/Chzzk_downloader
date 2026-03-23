@@ -47,6 +47,9 @@ class ChannelTask:
     # Twitter Spaces 전용
     spaces_process: Optional[asyncio.subprocess.Process] = field(default=None, repr=False)
     _current_space_id: Optional[str] = None
+    # Twitter Spaces 전용: 라이브 중 캡처한 m3u8 URL (Space 종료 후 다운로드용)
+    captured_m3u8_url: Optional[str] = None
+    captured_m3u8_at: Optional[str] = None  # 캡처 시각 (ISO 포맷)
 
 
 class Conductor:
@@ -248,6 +251,8 @@ class Conductor:
                     "platform": t.platform.value,
                     "channel_id": t.channel_id,
                     "auto_record": t.auto_record,
+                    "captured_m3u8_url": t.captured_m3u8_url,
+                    "captured_m3u8_at": t.captured_m3u8_at,
                 }
                 for key, t in self._channels.items()
             }
@@ -288,6 +293,12 @@ class Conductor:
                     channel_id = config.get("channel_id", key.split(":", 1)[-1])
 
                 self.add_channel(channel_id, auto_record=auto_record, platform=platform)
+                # m3u8 캡처 URL 복원
+                composite_key_restored = self.make_composite_key(platform, channel_id)
+                restored_task = self._channels.get(composite_key_restored)
+                if restored_task and platform.value == "twitter_spaces":
+                    restored_task.captured_m3u8_url = config.get("captured_m3u8_url")
+                    restored_task.captured_m3u8_at = config.get("captured_m3u8_at")
 
             if migrated:
                 # 마이그레이션된 경우 새 포맷으로 즉시 저장
@@ -325,9 +336,19 @@ class Conductor:
                 task.thumbnail_url = status.get("thumbnail_url")
                 task.profile_image_url = status.get("profile_image_url")
 
-                # Twitter Spaces: space_id 업데이트
+                # Twitter Spaces: space_id 및 m3u8_url 업데이트
                 if task.platform == Platform.TWITTER_SPACES:
                     task._current_space_id = status.get("space_id")
+                    # m3u8 URL이 새로 캡처되면 저장 (기존 URL 덮어쓰지 않음 — 더 오래 유효할 수 있음)
+                    new_m3u8 = status.get("m3u8_url")
+                    if new_m3u8 and not task.captured_m3u8_url:
+                        task.captured_m3u8_url = new_m3u8
+                        task.captured_m3u8_at = datetime.now().isoformat()
+                        logger.info(
+                            f"[{composite_key}] m3u8 URL 캡처 완료 "
+                            f"(space_id={task._current_space_id})"
+                        )
+                        self._save_persistence()
 
                 # ── 라이브 감지 날짜 기록 (하루 1회, 날짜 경계 자동 처리) ──
                 if status["is_live"]:
@@ -678,6 +699,11 @@ class Conductor:
                     "platform": "twitter_spaces",
                     "space_id": task._current_space_id,
                 }
+
+            # Twitter Spaces m3u8 캡처 정보
+            if task.platform == Platform.TWITTER_SPACES:
+                status["captured_m3u8_url"] = task.captured_m3u8_url
+                status["captured_m3u8_at"] = task.captured_m3u8_at
 
             archiver = task.chat_archiver
             if archiver is not None:

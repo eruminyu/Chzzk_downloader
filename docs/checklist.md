@@ -436,3 +436,28 @@
 - [x] `docs/plan-multiplatform-test-guide.md`: TwitCasting/Twitter Spaces 라이브 감지 테스트 가이드
 - [x] `docs/plan-archive-download.md`: 아카이브 다운로드 계획 문서
 - [x] `docs/done-archive-download.md`: 아카이브 다운로드 완료 문서
+
+## 2026-03-24: Twitter Spaces m3u8 URL 자동 캡처
+
+### 배경
+- Twitter API Free 티어 제한 및 yt-dlp x.com 유저 페이지 미지원으로 자동 감지 불가
+- 비공식 GraphQL API + 쿠키 인증으로 라이브 감지 + m3u8 URL 캡처 방식으로 전환
+
+### 백엔드
+- [x] `backend/app/engine/base.py`: `LiveStatus`에 `m3u8_url` 필드 추가
+- [x] `backend/app/engine/twitter_spaces.py`: 전면 재작성
+  - Netscape 쿠키 파일에서 `auth_token`, `ct0` 파싱
+  - 비공식 GraphQL `UserByScreenName` → `UserTweets` 타임라인 폴링
+  - Space 감지 시 `live_video_stream/status/{media_key}`에서 m3u8 URL 추출
+  - httpx 비동기 HTTP 클라이언트 사용 (기존 asyncio subprocess 대체)
+- [x] `backend/app/engine/conductor.py`:
+  - `ChannelTask`에 `captured_m3u8_url`, `captured_m3u8_at` 필드 추가
+  - 라이브 감지 시 m3u8 URL 저장 + `channels.json` 퍼시스턴스 반영
+  - `get_all_status()`에서 `captured_m3u8_url`, `captured_m3u8_at` 노출
+- [x] `backend/app/api/archive.py`: Twitter Spaces m3u8 관련 3개 엔드포인트 추가
+  - `GET /api/archive/spaces/captured`: 캡처된 m3u8 URL 목록 조회
+  - `POST /api/archive/spaces/download-captured`: 캡처된 m3u8로 다운로드 시작
+  - `DELETE /api/archive/spaces/captured/{composite_key}`: 다운로드 완료 후 초기화
+
+### 문서
+- [x] `docs/plan-twitter-spaces-m3u8-capture.md`: 구현 계획 문서

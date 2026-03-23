@@ -31,6 +31,8 @@ class LiveStatus(TypedDict, total=False):
     profile_image_url: str
     # Twitter Spaces 전용: 녹화에 필요한 space_id
     space_id: Optional[str]
+    # Twitter Spaces 전용: 라이브 중 캡처한 m3u8 URL
+    m3u8_url: Optional[str]
 
 
 @runtime_checkable

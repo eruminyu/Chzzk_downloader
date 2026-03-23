@@ -1,6 +1,7 @@
 """
 Chzzk-Recorder-Pro: Archive API Router
 TwitCasting 아카이브 목록 조회 및 아카이브 다운로드 엔드포인트.
+Twitter Spaces m3u8 URL 조회 및 다운로드 엔드포인트 포함.
 """
 
 from __future__ import annotations
@@ -20,9 +21,15 @@ router = APIRouter(prefix="/api/archive", tags=["Archive"])
 class ArchiveDownloadRequest(BaseModel):
     """아카이브 다운로드 요청."""
 
-    url: str = Field(..., description="아카이브 URL (TwitCasting 아카이브 또는 Twitter Spaces URL)")
+    url: str = Field(..., description="아카이브 URL (TwitCasting 아카이브 또는 Twitter Spaces m3u8/URL)")
     quality: str = Field("best", description="화질 (best, worst, format_id)")
     output_dir: Optional[str] = Field(None, description="저장 디렉토리 (기본: settings)")
+
+
+class SpacesM3u8ClearRequest(BaseModel):
+    """Twitter Spaces m3u8 URL 초기화 요청."""
+
+    composite_key: str = Field(..., description="채널 복합 키 (twitter_spaces:username)")
 
 
 # ── 엔드포인트 ───────────────────────────────────────────
@@ -67,3 +74,81 @@ async def download_archive(req: ArchiveDownloadRequest):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Twitter Spaces m3u8 캡처 관련 ────────────────────────────────────
+
+@router.get("/spaces/captured", summary="캡처된 Twitter Spaces m3u8 URL 목록 조회")
+async def list_captured_spaces():
+    """등록된 Twitter Spaces 채널 중 m3u8 URL이 캡처된 항목 목록을 반환합니다."""
+    from app.main import get_recorder_service
+
+    service = get_recorder_service()
+    channels = service.get_channels()
+    result = [
+        {
+            "composite_key": ch["composite_key"],
+            "channel_id": ch["channel_id"],
+            "channel_name": ch.get("channel_name") or ch["channel_id"],
+            "title": ch.get("title", ""),
+            "captured_m3u8_url": ch.get("captured_m3u8_url"),
+            "captured_m3u8_at": ch.get("captured_m3u8_at"),
+        }
+        for ch in channels
+        if ch.get("platform") == "twitter_spaces" and ch.get("captured_m3u8_url")
+    ]
+    return {"spaces": result, "total": len(result)}
+
+
+@router.post("/spaces/download-captured", summary="캡처된 m3u8 URL로 Twitter Spaces 다운로드")
+async def download_captured_space(req: SpacesM3u8ClearRequest):
+    """캡처된 m3u8 URL을 사용하여 Twitter Spaces 아카이브 다운로드를 시작합니다."""
+    from app.main import get_recorder_service
+
+    service = get_recorder_service()
+    channels = service.get_channels()
+    target = next(
+        (ch for ch in channels if ch["composite_key"] == req.composite_key),
+        None,
+    )
+    if target is None:
+        raise HTTPException(status_code=404, detail=f"채널을 찾을 수 없습니다: {req.composite_key}")
+
+    m3u8_url = target.get("captured_m3u8_url")
+    if not m3u8_url:
+        raise HTTPException(
+            status_code=404,
+            detail=f"'{req.composite_key}' 채널에 캡처된 m3u8 URL이 없습니다. Space가 라이브 중일 때 자동으로 캡처됩니다.",
+        )
+
+    try:
+        task_id = await service.download_vod(url=m3u8_url)
+        return {
+            "task_id": task_id,
+            "message": "Twitter Spaces 다운로드가 시작되었습니다.",
+            "composite_key": req.composite_key,
+            "m3u8_url": m3u8_url,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/spaces/captured/{composite_key:path}", summary="캡처된 m3u8 URL 초기화")
+async def clear_captured_space(composite_key: str):
+    """다운로드 완료 후 캡처된 m3u8 URL을 초기화합니다."""
+    from app.main import get_recorder_service
+    from app.engine.base import Platform
+
+    service = get_recorder_service()
+    conductor = service._conductor
+
+    # composite_key로 채널 직접 접근
+    task = conductor._channels.get(composite_key)
+    if task is None:
+        raise HTTPException(status_code=404, detail=f"채널을 찾을 수 없습니다: {composite_key}")
+
+    task.captured_m3u8_url = None
+    task.captured_m3u8_at = None
+    conductor._save_persistence()
+
+    return {"message": f"'{composite_key}' m3u8 URL 초기화 완료."}
