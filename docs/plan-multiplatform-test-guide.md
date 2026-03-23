@@ -37,12 +37,28 @@ Chzzk Recorder Pro는 치지직 외에 **TwitCasting**과 **Twitter Spaces** 라
 
 ### Twitter Spaces 전제조건
 
-**Bearer Token 발급:**
+> **중요**: Twitter Spaces 감지는 **비공식 GraphQL API**를 사용하므로 **쿠키 파일이 필수**다.
+> 공식 Bearer Token은 사용하지 않는다.
 
-1. [https://developer.twitter.com](https://developer.twitter.com) 접속 → "Developer Portal" 로그인
-2. 프로젝트/앱 생성 (없으면 신규 생성)
-3. 앱 > "Keys and tokens" 탭
-4. **Bearer Token** 복사
+**쿠키 파일 추출 방법:**
+
+브라우저에서 twitter.com(또는 x.com)에 로그인한 상태로 Netscape 형식 쿠키를 추출한다.
+
+추천 브라우저 확장 프로그램:
+- Chrome: **EditThisCookie** 또는 **Get cookies.txt LOCALLY**
+- Firefox: **cookies.txt** 확장
+
+추출 시 `auth_token`과 `ct0` 쿠키가 반드시 포함되어야 한다.
+
+추출 후 저장 경로 예시:
+```
+/home/user/chzzk-recorder-pro/cookies/twitter_cookies.txt
+```
+
+**채널 ID (`@username` 핸들):**
+
+> Twitter Spaces는 채널 추가 시 숫자 ID가 아닌 **`@` 없는 username 핸들**을 사용한다.
+> 예: `https://twitter.com/KalserianT` → 채널 ID: `KalserianT`
 
 **yt-dlp 설치 확인 (서버에서):**
 
@@ -57,14 +73,6 @@ curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr
 chmod a+rx /usr/local/bin/yt-dlp
 ```
 
-**채널 ID (숫자 user_id) 확인:**
-
-> Twitter Spaces는 채널 추가 시 `@username` 핸들이 아닌 **숫자 user_id**가 필요하다.
-
-핸들 → user_id 변환 방법:
-- [https://tweeterid.com](https://tweeterid.com) 에서 `@username` 입력 → 숫자 ID 확인
-- 또는 Twitter API: `GET https://api.twitter.com/2/users/by/username/{username}`
-
 ---
 
 ## 1단계: 인증 설정
@@ -75,8 +83,8 @@ chmod a+rx /usr/local/bin/yt-dlp
    - `Client Secret` 입력
    - **저장** 클릭 → "설정이 저장되었습니다" 토스트 확인
 3. **Twitter Spaces** 섹션:
-   - `Bearer Token` 입력
-   - 쿠키 파일 경로: 선택사항 (비공개 Space 녹화 시 필요)
+   - `쿠키 파일 경로` 입력 (Netscape 형식 .txt 파일의 서버 절대 경로)
+   - 예: `/home/user/chzzk-recorder-pro/cookies/twitter_cookies.txt`
    - **저장** 클릭
 
 ---
@@ -89,7 +97,7 @@ chmod a+rx /usr/local/bin/yt-dlp
    - 인증이 설정되지 않은 플랫폼은 🔒 아이콘과 함께 비활성화됨
 4. 채널 ID 입력:
    - TwitCasting: URL의 사용자명 (`twitcasting.tv/someuser` → `someuser`)
-   - Twitter Spaces: 숫자 user_id (`123456789`)
+   - Twitter Spaces: `@` 없는 username 핸들 (`https://twitter.com/KalserianT` → `KalserianT`)
 5. 자동 녹화 토글 켜기
 6. **추가** 클릭
 
@@ -124,22 +132,41 @@ ls -lh ~/chzzk-recorder-pro/recordings/
 
 ### Twitter Spaces 테스트
 
+**동작 흐름:**
+
+```
+감시 루프 → GraphQL UserByScreenName (username → user_id)
+         → GraphQL UserTweets (활성 Space 탐색)
+         → live_video_stream/status/{media_key} (m3u8 URL 캡처)
+         → Space 종료 후 캡처된 m3u8 URL로 yt-dlp 다운로드
+```
+
 **라이브 감지 확인:**
 
 ```bash
 tail -f ~/chzzk-recorder-pro/logs/service.log | grep -i twitter
 ```
 
-Space 시작 시 아래 로그가 출력되어야 함:
+Space 시작 시 아래 로그가 순서대로 출력되어야 함:
 ```
-[twitter_spaces:123456789] Space 시작 감지: Space 제목
-[twitter_spaces:123456789] yt-dlp 녹화 시작 → /path/to/recordings/채널명_날짜.m4a
+[TwitterSpaces:KalserianT] 라이브 Space 감지: 1abcXXXXXXX — Space 제목 (m3u8 캡처 완료)
+[twitter_spaces:KalserianT] 🔴 방송 시작 감지!
+```
+
+m3u8 캡처 성공 시 Discord에도 알림이 발송된다 (봇 설정 시).
+
+**Space 종료 후 다운로드:**
+
+Space가 종료되면 캡처된 m3u8 URL로 자동 다운로드가 시작된다.
+또는 Discord에서 수동으로 다운로드:
+```
+/download-space url:<캡처된_m3u8_url>
 ```
 
 **녹화 파일 확인:**
 ```bash
 ls -lh ~/chzzk-recorder-pro/recordings/
-# → [Twitter채널명] Space제목_YYYYMMDD_HHMMSS.m4a 형식
+# → [KalserianT] Space제목_YYYYMMDD_HHMMSS.m4a 형식
 ```
 
 > **주의**: Twitter Spaces는 오디오 전용 녹화 (m4a 포맷)
@@ -158,15 +185,22 @@ grep "TwitCasting" ~/chzzk-recorder-pro/logs/service.log | tail -20
 - `API 응답 401` → Client ID/Secret 오류. Settings에서 재입력
 - `API 요청 실패` → 네트워크 문제 또는 TwitCasting API 서버 다운
 
-### Twitter Spaces Bearer Token 오류
+### Twitter Spaces 쿠키 인증 오류
 
-**증상**: 채널 추가 후 감지 안 됨
+**증상**: 채널 추가 후 감지 안 됨, 항상 오프라인으로 표시
 **확인**:
 ```bash
-grep "twitter_spaces" ~/chzzk-recorder-pro/logs/service.log | tail -20
+grep "twitter_spaces\|TwitterSpaces" ~/chzzk-recorder-pro/logs/service.log | tail -20
 ```
-- `401 Unauthorized` → Bearer Token 만료 또는 오류. Developer Portal에서 재발급
-- `403 Forbidden` → Twitter API 요금제 문제. Free tier는 Spaces API 접근 제한 있음
+- `쿠키 파일이 설정되지 않았거나 없습니다` → Settings에서 쿠키 파일 경로 확인
+- `auth_token/ct0를 찾을 수 없습니다` → 쿠키 파일에 `auth_token`, `ct0` 항목 없음. 브라우저에서 재추출
+- `쿠키 인증 만료 (401)` → twitter.com에 재로그인 후 쿠키 재추출
+- `UserByScreenName 조회 실패` → username 핸들 확인 (숫자 ID가 아닌 문자 핸들이어야 함)
+
+**GraphQL QUERY_ID 만료:**
+
+Twitter 배포 시 QUERY_ID가 변경될 수 있다. 증상: `400 Bad Request` 로그.
+최신 QUERY_ID는 twspace-dl 또는 yt-dlp 소스에서 확인 가능.
 
 ### yt-dlp를 찾을 수 없음
 
@@ -213,10 +247,10 @@ tail -f ~/chzzk-recorder-pro/logs/service.log | grep "채널ID"
 
 ### Twitter Spaces
 
-- [ ] developer.twitter.com에서 Bearer Token 발급
+- [ ] twitter.com 로그인 상태에서 Netscape 형식 쿠키 파일 추출 (auth_token, ct0 포함 확인)
 - [ ] `yt-dlp --version` 으로 설치 확인
-- [ ] Settings > Twitter Spaces에 Bearer Token 저장
-- [ ] 숫자 user_id 확인 (tweeterid.com 활용)
+- [ ] Settings > Twitter Spaces에 쿠키 파일 경로 저장
+- [ ] username 핸들 확인 (`@` 제외한 문자 핸들, 숫자 ID 아님)
 - [ ] Dashboard에서 Twitter Spaces 채널 추가
-- [ ] 라이브 Space 감지 로그 확인
-- [ ] m4a 녹화 파일 생성 확인
+- [ ] 라이브 Space 감지 + m3u8 캡처 로그 확인
+- [ ] Space 종료 후 m4a 녹화 파일 생성 확인
