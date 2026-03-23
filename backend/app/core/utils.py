@@ -53,6 +53,39 @@ def extract_channel_id(channel_id: str) -> str:
     return channel_id
 
 
+def extract_twitcasting_id(value: str) -> str:
+    """TwitCasting URL 또는 순수 유저 ID에서 유저 ID만 추출한다.
+
+    지원 형식:
+        - https://twitcasting.tv/someuser
+        - https://twitcasting.tv/someuser/movie/123456
+        - someuser (순수 ID)
+    """
+    value = value.strip().rstrip("/")
+    if "twitcasting.tv/" in value:
+        # path의 첫 번째 세그먼트가 유저 ID
+        path = value.split("twitcasting.tv/", 1)[1]
+        value = path.split("/")[0].split("?")[0]
+    return value
+
+
+def extract_twitter_id(value: str) -> str:
+    """Twitter/X URL 또는 순수 유저 ID에서 유저 ID만 추출한다.
+
+    지원 형식:
+        - https://x.com/someuser
+        - https://twitter.com/someuser
+        - someuser (순수 ID, 숫자 numeric ID도 그대로 통과)
+    """
+    value = value.strip().rstrip("/")
+    for domain in ("x.com/", "twitter.com/"):
+        if domain in value:
+            path = value.split(domain, 1)[1]
+            value = path.split("/")[0].split("?")[0]
+            break
+    return value
+
+
 def clean_filename(name: str, max_length: int = 150) -> str:
     """파일명에서 사용할 수 없는 특수문자를 제거한다.
 

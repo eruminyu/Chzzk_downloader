@@ -14,7 +14,11 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from app.core.config import get_settings
-from app.core.utils import update_env_file as _update_env_file
+from app.core.utils import (
+    extract_twitcasting_id,
+    extract_twitter_id,
+    update_env_file as _update_env_file,
+)
 from app.engine.base import Platform
 
 router = APIRouter(prefix="/api/platforms", tags=["Platforms"])
@@ -74,9 +78,16 @@ async def add_platform_channel(req: AddPlatformChannelRequest):
                 detail="Twitter Spaces 채널을 추가하려면 먼저 설정에서 Bearer Token을 입력해주세요.",
             )
 
+    # URL로 입력해도 ID만 추출
+    channel_id = req.channel_id
+    if platform == Platform.TWITCASTING:
+        channel_id = extract_twitcasting_id(channel_id)
+    elif platform == Platform.TWITTER_SPACES:
+        channel_id = extract_twitter_id(channel_id)
+
     service = get_recorder_service()
     return service.add_platform_channel(
-        channel_id=req.channel_id,
+        channel_id=channel_id,
         platform=platform,
         auto_record=req.auto_record,
     )
