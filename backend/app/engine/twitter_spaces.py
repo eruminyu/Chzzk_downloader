@@ -230,11 +230,24 @@ class TwitterSpacesEngine:
 
     @staticmethod
     def _resolve_ytdlp_path() -> str:
-        """yt-dlp 실행 파일 경로를 찾는다."""
+        """yt-dlp 실행 파일 경로를 찾는다.
+
+        시스템 PATH → 현재 Python 인터프리터의 venv Scripts/bin 순으로 탐색.
+        """
+        import sys
+
         for name in ("yt-dlp", "yt-dlp.exe", "yt_dlp"):
             path = shutil.which(name)
             if path:
                 return path
+
+        # venv 내부 탐색 (pip install yt-dlp 했지만 PATH에 없는 경우)
+        venv_bin = Path(sys.executable).parent
+        for name in ("yt-dlp", "yt-dlp.exe", "yt_dlp"):
+            candidate = venv_bin / name
+            if candidate.is_file():
+                return str(candidate)
+
         raise FileNotFoundError(
             "yt-dlp를 찾을 수 없습니다. "
             "pip install yt-dlp 또는 시스템 PATH에 yt-dlp를 추가하세요."
