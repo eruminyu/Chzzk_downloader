@@ -132,6 +132,10 @@ class RecorderService:
         """VOD 메타데이터를 조회한다."""
         return await self._vod_engine.get_video_info(url)
 
+    async def capture_space(self, username: str) -> dict:
+        """Twitter Spaces m3u8 URL을 즉시 1회 조회한다."""
+        return await self._conductor.capture_space(username)
+
     async def download_vod(
         self,
         url: str,

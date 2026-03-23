@@ -488,3 +488,23 @@
 ### 문서
 - [x] `docs/plan-cookie-validator-discord.md`: 구현 계획 문서
 - [x] `docs/done-cookie-validator-discord.md`: 구현 완료 문서
+
+## 2026-03-24: Twitter Spaces 수동 캡처 모드 전환
+
+### 배경
+- 비공식 GraphQL API 5초 폴링 시 429 Rate Limit 발생 확인
+- 자동 감시 루프 비활성화 → Discord 수동 커맨드로 전환
+
+### 백엔드
+- [x] `backend/app/engine/conductor.py`:
+  - `_monitor_channel()`: `Platform.TWITTER_SPACES`이면 즉시 return (폴링 완전 비활성화)
+  - `capture_space(username)` 메서드 추가: `check_live_status()` 1회 호출 + m3u8 캡처 + 저장
+- [x] `backend/app/services/recorder.py`:
+  - `capture_space(username)` 래퍼 메서드 추가
+- [x] `backend/app/services/discord_bot.py`:
+  - 프리픽스 커맨드: `!capture-space <username>`
+  - 슬래시 커맨드: `/capture-space username:<핸들>`
+  - 헬퍼: `_do_capture_space(username)` — 캡처 결과 Embed 반환
+
+### 문서
+- [x] `docs/done-twitter-spaces-manual-capture.md`: 구현 완료 문서

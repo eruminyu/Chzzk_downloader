@@ -405,6 +405,24 @@ class DiscordBotService:
             embed = await _do_download_space(url)
             await interaction.followup.send(embed=embed)
 
+        @bot.command(name="capture-space")
+        async def cmd_capture_space(ctx: commands.Context, username: str = "") -> None:
+            """Twitter Spaces m3u8 URL 즉시 캡처: !capture-space <username>."""
+            if not username:
+                await ctx.send("❓ 사용법: `!capture-space <username>` (@ 없는 핸들)")
+                return
+            await ctx.send(embed=await _do_capture_space(username))
+
+        @bot.tree.command(name="capture-space", description="Twitter Spaces m3u8 URL을 즉시 1회 조회합니다 (자동 감지 대체)")
+        @app_commands.describe(username="Twitter 계정 핸들 (@ 제외, 예: KalserianT)")
+        async def slash_capture_space(
+            interaction: discord.Interaction,
+            username: str,
+        ) -> None:
+            await interaction.response.defer()
+            embed = await _do_capture_space(username)
+            await interaction.followup.send(embed=embed)
+
         # ── Spaces 헬퍼 ──────────────────────────────────────────
 
         def _get_spaces_embed() -> tuple[discord.Embed | None, str | None]:
@@ -451,4 +469,40 @@ class DiscordBotService:
                     "❌ 다운로드 실패",
                     f"오류: {str(e)[:200]}",
                     "red",
+                )
+
+        async def _do_capture_space(username: str) -> discord.Embed:
+            """Twitter Spaces m3u8 URL을 즉시 1회 조회하고 결과 Embed를 반환한다."""
+            try:
+                result = await self._service.capture_space(username)
+            except Exception as e:
+                return _make_embed("❌ 캡처 실패", f"오류: {str(e)[:200]}", "red")
+
+            if "error" in result:
+                return _make_embed("❌ 캡처 실패", result["error"], "red")
+
+            if result.get("captured") and result.get("m3u8_url"):
+                channel_name = result.get("channel_name") or username
+                title = result.get("title") or "제목 없음"
+                m3u8_url = result["m3u8_url"]
+                return _make_embed(
+                    "🎙️ m3u8 URL 캡처 완료",
+                    f"**@{channel_name}** — {title}",
+                    "green",
+                    fields={
+                        "m3u8 URL": m3u8_url,
+                        "다운로드": f"`/download-space url:{m3u8_url}`",
+                    },
+                )
+            elif result.get("is_live"):
+                return _make_embed(
+                    "⚠️ 라이브 중이지만 m3u8 캡처 실패",
+                    f"@{username} Space가 진행 중이나 m3u8 URL을 가져오지 못했습니다.\n잠시 후 다시 시도하세요.",
+                    "yellow",
+                )
+            else:
+                return _make_embed(
+                    "📴 Space 없음",
+                    f"@{username}가 현재 Space를 진행하고 있지 않습니다.",
+                    "blue",
                 )

@@ -388,7 +388,10 @@ async def _get_active_space(
             # 응답은 왔지만 Space 없음 → 오프라인
             return None
         except httpx.HTTPStatusError as e:
-            logger.warning(f"UserTweets HTTP 오류 (qid={qid}): {e.response.status_code} — {e.response.text[:200]}")
+            if e.response.status_code == 429:
+                logger.warning(f"[TwitterSpaces:{username}] UserTweets 레이트 리밋 (429). 다음 폴링까지 대기.")
+            else:
+                logger.warning(f"UserTweets HTTP 오류 (qid={qid}): {e.response.status_code} — {e.response.text[:200]}")
             continue
         except Exception as e:
             logger.warning(f"UserTweets 조회 실패 (qid={qid}): {e}")

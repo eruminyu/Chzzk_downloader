@@ -339,6 +339,57 @@ class Conductor:
         """Twitter 쿠키 유효성 상태를 반환한다."""
         return dict(self._cookie_status)
 
+    async def capture_space(self, username: str) -> dict:
+        """Twitter Spaces 채널의 m3u8 URL을 즉시 1회 조회한다.
+
+        Discord /capture-space 커맨드에서 호출. 레이트 리밋 문제로 자동 폴링을
+        비활성화한 대신 사용자가 원하는 시점에 수동으로 캡처를 트리거한다.
+
+        Returns:
+            {
+                "captured": bool,
+                "m3u8_url": str | None,
+                "is_live": bool,
+                "title": str | None,
+                "channel_name": str | None,
+            }
+        """
+        composite_key = self.make_composite_key(Platform.TWITTER_SPACES, username)
+        task = self._channels.get(composite_key)
+
+        if task is None:
+            return {"captured": False, "m3u8_url": None, "is_live": False,
+                    "title": None, "channel_name": None, "error": f"등록되지 않은 채널: {username}"}
+
+        try:
+            engine = self._get_engine(Platform.TWITTER_SPACES)
+            status = await engine.check_live_status(username)
+        except Exception as e:
+            logger.error(f"[{composite_key}] capture_space 조회 실패: {e}")
+            return {"captured": False, "m3u8_url": None, "is_live": False,
+                    "title": None, "channel_name": None, "error": str(e)}
+
+        # 상태 업데이트
+        task.is_live = status["is_live"]
+        task.channel_name = status.get("channel_name")
+        task.title = status.get("title")
+        task._current_space_id = status.get("space_id")
+
+        new_m3u8 = status.get("m3u8_url")
+        if new_m3u8:
+            task.captured_m3u8_url = new_m3u8
+            task.captured_m3u8_at = datetime.now().isoformat()
+            self._save_persistence()
+            logger.info(f"[{composite_key}] capture_space: m3u8 URL 캡처 완료")
+
+        return {
+            "captured": bool(new_m3u8),
+            "m3u8_url": new_m3u8,
+            "is_live": status["is_live"],
+            "title": status.get("title"),
+            "channel_name": status.get("channel_name"),
+        }
+
     def _save_persistence(self) -> None:
         """채널 목록을 파일에 저장한다."""
         try:
@@ -409,6 +460,17 @@ class Conductor:
     async def _monitor_channel(self, composite_key: str) -> None:
         """단일 채널의 라이브 상태를 주기적으로 확인한다."""
         settings = get_settings()
+        task = self._channels.get(composite_key)
+
+        # Twitter Spaces는 비공식 GraphQL API 레이트 리밋 문제로 자동 폴링 비활성화
+        # Discord /capture-space 커맨드로 수동 트리거
+        if task and task.platform == Platform.TWITTER_SPACES:
+            logger.info(
+                f"[{composite_key}] Twitter Spaces 수동 캡처 모드 — "
+                "자동 감시 없음. Discord `/capture-space` 커맨드로 m3u8 URL을 수동으로 캡처하세요."
+            )
+            return
+
         interval = settings.monitor_interval
         retry_count = 0
         max_retries = settings.max_record_retries
