@@ -8,8 +8,48 @@
 
 ## [Unreleased]
 
-### 추가 예정
+### Added
 - 추후 개발될 기능 목록
+
+---
+
+## [1.1.0] - 2026-03-24
+
+### Added
+- **멀티 플랫폼 감시**: TwitCasting, Twitter Spaces 채널 자동 감시 및 녹화 지원
+  - `Platform` 열거형 기반 플랫폼 추상화 (`base.py`)
+  - `ChannelTask`에 `platform` 필드 추가, 복합 키(`platform:channel_id`) 방식으로 채널 관리
+  - TwitCasting 엔진: TwitCasting API v2 + Streamlink 스트림 추출 (`twitcasting.py`)
+  - Twitter Spaces 엔진: 비공식 GraphQL API + m3u8 URL 캡처 (`twitter_spaces.py`)
+  - Dashboard에 플랫폼 드롭다운 및 플랫폼 배지(치지직/TwitCasting/Twitter Spaces) 표시
+  - 인증 미설정 플랫폼 채널 추가 시 자물쇠 아이콘 + 잠금 처리
+
+- **Twitter Spaces m3u8 캡처 및 수동 캡처 모드**
+  - 비공식 GraphQL `UserByScreenName` → `UserTweets` 타임라인 폴링으로 Space 감지
+  - Space 라이브 시 `dynamic_playlist.m3u8` URL 자동 추출 및 `channels.json` 영속 저장
+  - 429 Rate Limit 대응: 자동 감시 루프 비활성화 → Discord `/capture-space` 수동 캡처 방식 전환
+  - Discord 슬래시/프리픽스 커맨드: `/capture-space`, `!capture-space`
+
+- **아카이브 다운로드 기능**
+  - TwitCasting 채널 과거 방송 목록 조회 및 다운로드 (`GET /api/archive/twitcasting/{channel_id}`)
+  - Twitter Spaces m3u8 URL 직접 입력 다운로드
+  - 캡처된 m3u8 URL 목록 조회/다운로드/삭제 API (`/api/archive/spaces/*`)
+  - Archive 페이지 신규 추가 (사이드바 메뉴 포함)
+
+- **Twitter 쿠키 만료 감지 + Discord 알림**
+  - `verify_cookie()`: `GET /1.1/account/verify_credentials.json` 호출로 쿠키 유효성 24시간 주기 검증
+  - 만료 감지 시 Discord 알림 자동 발송 (중복 발송 방지)
+  - Discord 커맨드: `/spaces`, `!spaces`, `/download-space`, `!download-space`
+  - `GET /api/settings/cookie-status`, `POST /api/settings/cookie-status/check` API 추가
+
+- **Settings 탭 구조 개편**
+  - 「일반」「다운로드」「인증」「알림」「외관」「정보」6탭 구조로 전면 재편
+  - 인증 탭: Chzzk / TwitCasting / Twitter Spaces 3개 섹션 통합 관리
+
+### Fixed
+- 원격 접속 시 API 호출 실패: `API_BASE_URL` 절대경로 → 상대경로(`/api`)로 변경
+- Docker `appuser` uid 불일치로 `.env`/`recordings/` 쓰기 실패 → root 실행으로 전환
+- Docker 초기 설정 시 컨테이너 내부 경로(`/app/recordings`) 기본값 안내 추가
 
 ---
 
@@ -39,5 +79,6 @@
 
 ---
 
-[Unreleased]: https://github.com/eruminyu/Chzzk_downloader/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/eruminyu/Chzzk_downloader/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/eruminyu/Chzzk_downloader/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/eruminyu/Chzzk_downloader/releases/tag/v1.0.0

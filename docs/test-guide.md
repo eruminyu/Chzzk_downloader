@@ -201,6 +201,65 @@ sudo journalctl -u chzzk-recorder@$USER -f
 
 ---
 
+## 5. 멀티 플랫폼 기능 테스트
+
+### TwitCasting 채널 감시 테스트
+
+**사전 준비:**
+- TwitCasting Developer 앱 등록 → `ClientID` / `ClientSecret` 획득
+- 설정 페이지 → 인증 탭 → TwitCasting 섹션에 입력
+
+**테스트 절차:**
+1. Dashboard → 채널 추가 드롭다운에서 `TwitCasting` 선택
+2. TwitCasting 사용자 ID(예: `someuser`) 입력 후 추가
+3. 대상 채널이 라이브 중이면 자동 녹화 시작 확인
+4. `GET /api/stream/channels` 응답에 `platform: "twitcasting"` 포함 확인
+
+### TwitCasting 아카이브 다운로드 테스트
+
+1. 사이드바 → Archive 페이지 이동
+2. TwitCasting 탭에서 채널 ID 입력 후 조회
+3. 과거 방송 목록 표시 확인
+4. 원하는 방송 선택 → 다운로드 시작 확인
+
+### Twitter Spaces 수동 캡처 테스트
+
+> [!NOTE]
+> Twitter Spaces는 비공식 GraphQL API의 Rate Limit 문제로 **자동 감시 없이 수동 캡처** 방식을 사용한다.
+> Space가 라이브 중일 때 Discord 커맨드로 직접 캡처해야 한다.
+
+**사전 준비:**
+- 트위터 계정 쿠키(`auth_token`, `ct0`) Netscape 포맷 파일 준비
+- 설정 페이지 → 인증 탭 → Twitter Spaces 섹션에 쿠키 파일 경로 입력
+- Discord 봇 설정 완료
+
+**테스트 절차:**
+
+1. Dashboard → 채널 추가에서 `Twitter Spaces` 선택, 대상 트위터 핸들(예: `KalserianT`) 입력
+2. 대상 계정에서 Space가 라이브 중인 시점에 Discord에서 캡처 커맨드 실행:
+   ```
+   /capture-space username:KalserianT
+   또는
+   !capture-space KalserianT
+   ```
+3. Space 라이브 중이면 녹색 Embed + m3u8 URL 반환 확인
+4. Space가 없으면 파란 Embed (오프라인 안내) 확인
+5. 캡처 후 다운로드:
+   ```
+   /download-space url:<캡처된_m3u8_url>
+   또는
+   Archive 페이지 → Twitter Spaces 탭에서 다운로드
+   ```
+6. `service.log`에서 429 오류 로그가 출력되지 않는지 확인
+
+**체크리스트:**
+- [ ] `/capture-space` 커맨드로 m3u8 URL 캡처 성공
+- [ ] 캡처 결과 Discord Embed 색상 정상 (성공: 녹색, 오프라인: 파란색)
+- [ ] `/download-space` 또는 Archive 페이지에서 다운로드 시작 확인
+- [ ] 쿠키 만료 시 Discord 알림 수신 확인 (`POST /api/settings/cookie-status/check`)
+
+---
+
 ## 포트 접근 문제 해결
 
 Ubuntu VM에서 외부(Windows 호스트)에서 접근이 안 될 경우:

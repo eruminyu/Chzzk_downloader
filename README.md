@@ -4,9 +4,10 @@
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.109+-009688.svg)
 ![React](https://img.shields.io/badge/React-19-61DAFB.svg)
 ![License](https://img.shields.io/badge/License-MIT-green.svg)
+![Platforms](https://img.shields.io/badge/Platforms-Chzzk%20%7C%20TwitCasting%20%7C%20Twitter%20Spaces-blueviolet.svg)
 
-**Chzzk-Recorder-Pro**는 네이버 치지직(Chzzk) 라이브 스트리밍 녹화 및 VOD 다운로드를 위한 강력한 올인원 솔루션입니다.
-안정적인 녹화 파이프라인, 직관적인 웹 대시보드, 그리고 실시간 채팅 아카이빙 기능을 제공합니다.
+**Chzzk-Recorder-Pro**는 치지직(Chzzk), TwitCasting, Twitter Spaces 라이브 스트리밍 녹화 및 VOD 다운로드를 위한 강력한 올인원 솔루션입니다.
+안정적인 녹화 파이프라인, 직관적인 웹 대시보드, 실시간 채팅 아카이빙, 그리고 Discord 봇 연동 기능을 제공합니다.
 
 ---
 
@@ -21,6 +22,7 @@
 ## ✨ 주요 기능
 
 ### 🎥 라이브 녹화 (Live Recording)
+- **멀티 플랫폼**: 치지직(Chzzk), TwitCasting, Twitter Spaces 동시 감시 및 녹화를 지원합니다.
 - **자동 녹화**: 등록한 스트리머가 방송을 켜면 자동으로 녹화를 시작합니다.
 - **안정성**: `Fragmented MP4` 기술을 적용하여 정전이나 프로세스 강제 종료 시에도 녹화된 파일이 손상되지 않습니다.
 - **고화질**: 원본 화질(Best Quality)을 손실 없이 저장합니다.
@@ -30,13 +32,17 @@
 - **대기열 시스템**: 여러 영상을 대기열에 등록하고, 드래그 앤 드롭으로 우선순위를 변경할 수 있습니다.
 - **이어받기**: 다운로드가 중단되어도 이어서 받을 수 있습니다.
 
+### 📥 아카이브 다운로드 (Archive)
+- **TwitCasting 과거 방송**: TwitCasting 채널의 과거 방송 목록을 조회하고 원하는 영상을 다운로드할 수 있습니다.
+- **Twitter Spaces**: m3u8 URL을 직접 입력하여 트위터 스페이스 녹음을 다운로드할 수 있습니다.
+
 ### 💬 채팅 아카이빙 (Chat Archiving)
 - **실시간 수집**: 라이브 녹화와 동시에 채팅 로그를 `.jsonl` 파일로 저장합니다.
 - **웹 뷰어**: 내장된 뷰어를 통해 날짜별, 채널별 채팅을 검색하고 조회할 수 있습니다.
 
 ### 📊 통계 및 알림
 - **대시보드**: 총 녹화 시간, 용량, 채널별 통계를 시각적으로 확인합니다.
-- **Discord 알림**: 녹화 시작/종료, 다운로드 완료 시 디스코드 봇을 통해 알림을 받습니다.
+- **Discord 봇**: 녹화 시작/종료, 다운로드 완료 알림 및 커맨드로 원격 제어가 가능합니다.
 
 ---
 
@@ -166,23 +172,55 @@ cd backend && python run.py
 
 ## ⚙️ 설정 가이드
 
-### 1. 치지직 인증 (성인 방송 녹화)
-성인 인증이 필요한 방송을 녹화하려면 네이버 로그인 쿠키가 필요합니다.
+### 1. 치지직 인증 (연령 제한 방송 녹화)
+연령 제한 방송을 녹화하려면 네이버 로그인 쿠키가 필요합니다.
 1. 웹 브라우저에서 네이버 로그인 후 개발자 도구(F12) → Application → Cookies를 엽니다.
 2. `NID_AUT`와 `NID_SES` 값을 복사합니다.
-3. Chzzk-Recorder-Pro 설정 페이지(Settings)에서 해당 값을 입력하고 저장합니다.
+3. Chzzk-Recorder-Pro 설정 페이지(Settings) → 인증 탭에서 해당 값을 입력하고 저장합니다.
 
-### 2. Discord 알림 설정
+### 2. TwitCasting 인증
+TwitCasting 채널 감시 및 아카이브 다운로드에 TwitCasting 계정 인증이 필요합니다.
+1. [TwitCasting Developer](https://twitcasting.tv/developer.php)에서 앱을 등록합니다.
+2. `ClientID`와 `ClientSecret`을 복사합니다.
+3. 설정 페이지 → 인증 탭의 TwitCasting 섹션에 입력하고 저장합니다.
+
+### 3. Twitter Spaces 인증
+Twitter Spaces 캡처를 위해 트위터 계정 쿠키가 필요합니다.
+1. 브라우저에서 twitter.com(x.com)에 로그인합니다.
+2. 개발자 도구(F12) → Application → Cookies에서 `auth_token`과 `ct0` 값을 확인합니다.
+3. 쿠키를 Netscape 포맷 파일(`.txt`)로 내보내거나, 설정 페이지 → 인증 탭에서 직접 입력합니다.
+4. 쿠키는 주기적으로 만료됩니다. 만료 시 Discord 봇을 통해 알림을 받을 수 있습니다.
+
+> 💡 **Twitter Spaces 수동 캡처**: Twitter 비공식 API 제한으로 인해 자동 감지 대신 Discord `/capture-space` 커맨드로 원하는 시점에 직접 캡처하는 방식을 사용합니다.
+
+### 4. Discord 알림 설정
 1. Discord Developer Portal에서 새 애플리케이션을 생성하고 Bot을 추가합니다.
 2. 봇 토큰(Token)을 복사합니다.
 3. 봇을 서버에 초대하고, 알림을 받을 채널 ID를 복사합니다. (디스코드 개발자 모드 켜기 필요)
 4. 설정 페이지의 Discord 섹션에 토큰과 채널 ID를 입력합니다.
- 
-명령어 예시
-   !status, 
-   !list, 
-   !record on <채널ID>, 	
-   !record off <채널ID>	
+
+**프리픽스 커맨드 (`!`):**
+
+| 커맨드 | 설명 |
+|--------|------|
+| `!status` | 현재 녹화 상태 확인 |
+| `!list` | 등록된 채널 목록 조회 |
+| `!record on <채널ID>` | 자동 녹화 활성화 |
+| `!record off <채널ID>` | 자동 녹화 비활성화 |
+| `!spaces` | 캡처된 Twitter Spaces m3u8 목록 조회 |
+| `!capture-space <핸들>` | Twitter Spaces m3u8 URL 즉시 캡처 |
+| `!download-space <m3u8 URL>` | 캡처된 Space 다운로드 시작 |
+
+**슬래시 커맨드 (`/`):**
+
+| 커맨드 | 설명 |
+|--------|------|
+| `/start` | 채널 녹화 시작 |
+| `/stop` | 채널 녹화 중지 |
+| `/status` | 현재 녹화 상태 확인 |
+| `/spaces` | 캡처된 Twitter Spaces m3u8 목록 조회 |
+| `/capture-space username:<핸들>` | Twitter Spaces m3u8 URL 즉시 캡처 |
+| `/download-space url:<m3u8 URL>` | 캡처된 Space 다운로드 시작 |
 
 ---
 
@@ -231,7 +269,7 @@ PORT=8001
 </details>
 
 <details>
-<summary><b>성인 방송이 녹화되지 않아요</b></summary>
+<summary><b>연령 제한 방송이 녹화되지 않아요</b></summary>
 
 네이버 로그인 쿠키가 필요합니다:
 1. 브라우저에서 네이버 로그인 → 개발자 도구(F12) → Application → Cookies
