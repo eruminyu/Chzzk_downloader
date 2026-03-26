@@ -272,14 +272,10 @@ class Conductor:
         # 모든 이벤트 큐 종료 신호 전송
         self.broadcast_event("shutdown")
 
-        for composite_key, task in self._channels.items():
-            pipe = task.pipeline
-            if pipe is not None and pipe.state == RecordingState.RECORDING:
-                await self._stop_recording(composite_key)
-
-            if task.spaces_process is not None:
-                await self._stop_spaces_recording(composite_key)
-
+        # ── 1단계: 모든 monitor task를 먼저 취소 ─────────────────
+        # retry sleep 중이거나 _start_recording 대기 중인 task가
+        # 새 녹화를 시작하지 못하도록 recording stop보다 먼저 처리한다.
+        for task in self._channels.values():
             mt = task.monitor_task
             if mt is not None and not mt.done():
                 mt.cancel()
@@ -289,6 +285,15 @@ class Conductor:
 
         if self._stats_broadcast_task is not None and not self._stats_broadcast_task.done():
             self._stats_broadcast_task.cancel()
+
+        # ── 2단계: 실행 중인 녹화 및 Spaces 프로세스 중지 ────────
+        for composite_key, task in self._channels.items():
+            pipe = task.pipeline
+            if pipe is not None and pipe.state == RecordingState.RECORDING:
+                await self._stop_recording(composite_key)
+
+            if task.spaces_process is not None:
+                await self._stop_spaces_recording(composite_key)
 
         logger.info("Conductor 종료 완료.")
 
@@ -651,6 +656,8 @@ class Conductor:
                                 f"자동 재녹화 시도 ({retry_count}/{max_retries})..."
                             )
                             await asyncio.sleep(5)
+                            if not self._running:
+                                break
                             await self._start_recording(
                                 composite_key,
                                 channel_name=task.channel_name,
