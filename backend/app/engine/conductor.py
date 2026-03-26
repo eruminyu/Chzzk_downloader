@@ -97,6 +97,7 @@ class Conductor:
         self._cookie_status: dict = {"valid": True, "checked_at": None, "reason": None}
         self._last_cookie_check: Optional[datetime] = None
         self._cookie_check_task: Optional[asyncio.Task] = None
+        self._stats_broadcast_task: Optional[asyncio.Task] = None
         self._load_persistence()
 
     def _get_engine(self, platform: Platform):
@@ -260,6 +261,8 @@ class Conductor:
 
         # 쿠키 검증 루프 시작
         self._cookie_check_task = asyncio.create_task(self._cookie_check_loop())
+        # 녹화 통계 실시간 브로드캐스트 루프 시작
+        self._stats_broadcast_task = asyncio.create_task(self._stats_broadcast_loop())
 
     async def stop(self) -> None:
         """모든 감시 및 녹화를 중지한다."""
@@ -284,7 +287,21 @@ class Conductor:
         if self._cookie_check_task is not None and not self._cookie_check_task.done():
             self._cookie_check_task.cancel()
 
+        if self._stats_broadcast_task is not None and not self._stats_broadcast_task.done():
+            self._stats_broadcast_task.cancel()
+
         logger.info("Conductor 종료 완료.")
+
+    async def _stats_broadcast_loop(self) -> None:
+        """녹화 중인 채널이 있을 때 2초마다 통계를 SSE로 브로드캐스트한다."""
+        while self._running:
+            await asyncio.sleep(2.0)
+            any_recording = any(
+                t.pipeline is not None and t.pipeline.state == RecordingState.RECORDING
+                for t in self._channels.values()
+            )
+            if any_recording and self._event_queues:
+                self.broadcast_event("status_update", self.get_all_status())
 
     async def _cookie_check_loop(self) -> None:
         """X 쿠키 유효성을 하루 1회 주기로 검증한다."""
