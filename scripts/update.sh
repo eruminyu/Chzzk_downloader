@@ -41,7 +41,7 @@ pull_latest() {
     info "이미 최신 버전입니다. 업데이트를 건너뜁니다."
     exit 0
   fi
-  git -C "$INSTALL_DIR" pull --ff-only origin main
+  git -C "$INSTALL_DIR" reset --hard origin/main
   info "코드 업데이트 완료 ✓"
 }
 
