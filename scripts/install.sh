@@ -182,7 +182,7 @@ clone_repo() {
   if [ -d "$INSTALL_DIR/.git" ]; then
     warn "이미 설치된 저장소가 있습니다: $INSTALL_DIR"
     warn "최신 버전으로 업데이트합니다..."
-    git -C "$INSTALL_DIR" pull --ff-only
+    git -C "$INSTALL_DIR" fetch origin && git -C "$INSTALL_DIR" reset --hard origin/main
   else
     info "저장소를 $INSTALL_DIR 에 클론 중..."
     git clone "$REPO_URL" "$INSTALL_DIR"
