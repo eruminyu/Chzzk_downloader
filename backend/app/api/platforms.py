@@ -10,13 +10,15 @@ from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from pathlib import Path
+
+from fastapi import APIRouter, HTTPException, UploadFile, File
 from pydantic import BaseModel, Field
 
 from app.core.config import get_settings
 from app.core.utils import (
     extract_twitcasting_id,
-    extract_twitter_id,
+    extract_x_id,
     update_env_file as _update_env_file,
 )
 from app.engine.base import Platform
@@ -41,11 +43,10 @@ class TwitcastingSettingsRequest(BaseModel):
     client_secret: str = Field(..., description="TwitCasting Client Secret")
 
 
-class TwitterSettingsRequest(BaseModel):
-    """Twitter Spaces 인증 설정 업데이트 요청."""
+class XSettingsRequest(BaseModel):
+    """X Spaces 인증 설정 업데이트 요청."""
 
-    bearer_token: str = Field(..., description="Twitter Bearer Token (OAuth 2.0 App-Only)")
-    cookie_file: Optional[str] = Field(None, description="Netscape 형식 쿠키 파일 경로")
+    bearer_token: str = Field(..., description="X Bearer Token (OAuth 2.0 App-Only)")
 
 
 # ── 채널 관리 ────────────────────────────────────────────
@@ -60,7 +61,7 @@ async def add_platform_channel(req: AddPlatformChannelRequest):
     except ValueError:
         raise HTTPException(
             status_code=400,
-            detail=f"지원하지 않는 플랫폼: '{req.platform}'. 사용 가능: chzzk, twitcasting, twitter_spaces",
+            detail=f"지원하지 않는 플랫폼: '{req.platform}'. 사용 가능: chzzk, twitcasting, x_spaces",
         )
 
     # 플랫폼 인증 설정 확인
@@ -71,19 +72,19 @@ async def add_platform_channel(req: AddPlatformChannelRequest):
                 status_code=400,
                 detail="TwitCasting 채널을 추가하려면 먼저 설정에서 Client ID와 Client Secret을 입력해주세요.",
             )
-    elif platform == Platform.TWITTER_SPACES:
-        if not settings.twitter_bearer_token:
+    elif platform == Platform.X_SPACES:
+        if not settings.x_bearer_token:
             raise HTTPException(
                 status_code=400,
-                detail="Twitter Spaces 채널을 추가하려면 먼저 설정에서 Bearer Token을 입력해주세요.",
+                detail="X Spaces 채널을 추가하려면 먼저 설정에서 Bearer Token을 입력해주세요.",
             )
 
     # URL로 입력해도 ID만 추출
     channel_id = req.channel_id
     if platform == Platform.TWITCASTING:
         channel_id = extract_twitcasting_id(channel_id)
-    elif platform == Platform.TWITTER_SPACES:
-        channel_id = extract_twitter_id(channel_id)
+    elif platform == Platform.X_SPACES:
+        channel_id = extract_x_id(channel_id)
 
     service = get_recorder_service()
     return service.add_platform_channel(
@@ -147,10 +148,10 @@ async def get_platform_status():
             "enabled": bool(settings.twitcasting_client_id and settings.twitcasting_client_secret),
             "authenticated": bool(settings.twitcasting_client_id and settings.twitcasting_client_secret),
         },
-        "twitter_spaces": {
-            "enabled": bool(settings.twitter_bearer_token),
-            "authenticated": bool(settings.twitter_bearer_token),
-            "cookie_file_set": bool(settings.twitter_cookie_file),
+        "x_spaces": {
+            "enabled": bool(settings.x_bearer_token),
+            "authenticated": bool(settings.x_bearer_token),
+            "cookie_file_set": bool(settings.x_cookie_file),
         },
     }
 
@@ -169,15 +170,38 @@ async def update_twitcasting_settings(req: TwitcastingSettingsRequest):
     return {"message": "TwitCasting 인증 설정 저장 완료."}
 
 
-@router.put("/settings/twitter", summary="Twitter Spaces 인증 설정 업데이트")
-async def update_twitter_settings(req: TwitterSettingsRequest):
-    """Twitter Bearer Token 및 쿠키 파일 경로를 .env 파일에 저장합니다."""
-    updates: dict[str, str] = {
-        "TWITTER_BEARER_TOKEN": req.bearer_token,
-    }
-    if req.cookie_file is not None:
-        updates["TWITTER_COOKIE_FILE"] = req.cookie_file
-
-    _update_env_file(updates)
+@router.put("/settings/x", summary="X Spaces 인증 설정 업데이트")
+async def update_x_settings(req: XSettingsRequest):
+    """X Bearer Token을 .env 파일에 저장합니다."""
+    _update_env_file({"X_BEARER_TOKEN": req.bearer_token})
     get_settings.cache_clear()
-    return {"message": "Twitter Spaces 인증 설정 저장 완료."}
+    return {"message": "X Spaces 인증 설정 저장 완료."}
+
+
+_COOKIE_SAVE_PATH = Path("data/x_cookies.txt")
+
+
+@router.post("/x/cookie", summary="X Spaces 쿠키 파일 업로드")
+async def upload_x_cookie(file: UploadFile = File(...)):
+    """Netscape 형식 쿠키 파일을 업로드하여 서버에 저장합니다."""
+    save_path = _COOKIE_SAVE_PATH.resolve()
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+
+    content = await file.read()
+    save_path.write_bytes(content)
+
+    _update_env_file({"X_COOKIE_FILE": str(save_path)})
+    get_settings.cache_clear()
+    return {"message": "쿠키 파일 업로드 완료.", "path": str(save_path)}
+
+
+@router.delete("/x/cookie", summary="X Spaces 쿠키 파일 삭제")
+async def delete_x_cookie():
+    """저장된 쿠키 파일을 삭제하고 설정을 초기화합니다."""
+    save_path = _COOKIE_SAVE_PATH.resolve()
+    if save_path.exists():
+        save_path.unlink()
+
+    _update_env_file({"X_COOKIE_FILE": ""})
+    get_settings.cache_clear()
+    return {"message": "쿠키 파일 삭제 완료."}

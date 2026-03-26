@@ -98,6 +98,11 @@ class RecorderService:
         logger.info(f"[Service] 녹화 중지 요청: {channel_id}")
         return await self._conductor.stop_manual_recording(channel_id)
 
+    async def stop_all_recordings(self) -> dict:
+        """모든 채널의 녹화를 중지한다."""
+        logger.info("[Service] 모든 녹화 중지 요청")
+        return await self._conductor.stop_all_recordings()
+
     async def start_channel(self, composite_key: str) -> dict:
         """녹화 시작 + 자동 녹화 ON. Discord /start 전용."""
         logger.info(f"[Service] 채널 시작 요청: {composite_key}")

@@ -96,9 +96,9 @@ class Settings(BaseSettings):
     twitcasting_client_id: Optional[str] = None
     twitcasting_client_secret: Optional[str] = None
 
-    # ── Twitter Spaces 인증 ──────────────────────────────
-    twitter_bearer_token: Optional[str] = None
-    twitter_cookie_file: Optional[str] = None  # Netscape 형식 쿠키 파일 경로
+    # ── X Spaces 인증 ────────────────────────────────────
+    x_bearer_token: Optional[str] = None
+    x_cookie_file: Optional[str] = None  # Netscape 형식 쿠키 파일 경로
 
     def resolve_ffmpeg_path(self) -> str:
         """FFmpeg 실행 파일 경로를 탐색 순서에 따라 결정한다.

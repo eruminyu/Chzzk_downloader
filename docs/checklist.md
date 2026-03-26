@@ -1,5 +1,23 @@
 # Chzzk-Recorder-Pro 개발 체크리스트
 
+## 2026-03-25: twitter → X 전체 rename
+
+- [x] `backend/app/engine/twitter_spaces.py` → `x_spaces.py` (파일 이름 변경)
+- [x] `Platform.TWITTER_SPACES = "twitter_spaces"` → `Platform.X_SPACES = "x_spaces"` (`base.py`)
+- [x] `TwitterSpacesEngine` → `XSpacesEngine`, `TWITTER_SPACES_URL` → `X_SPACES_URL` (`x_spaces.py`)
+- [x] `twitter_bearer_token` → `x_bearer_token`, `twitter_cookie_file` → `x_cookie_file` (`config.py`)
+- [x] `TWITTER_BEARER_TOKEN` → `X_BEARER_TOKEN`, `TWITTER_COOKIE_FILE` → `X_COOKIE_FILE` (`.env`)
+- [x] `TwitterSettingsRequest` → `XSettingsRequest`, 엔드포인트 `/settings/twitter` → `/settings/x`, `/twitter/cookie` → `/x/cookie` (`platforms.py`)
+- [x] 쿠키 저장 경로 `data/twitter_cookies.txt` → `data/x_cookies.txt` (`platforms.py`)
+- [x] conductor.py: import, 엔진 변수, 메서드명(`_check_twitter_cookie` → `_check_x_cookie`), 문자열 전부 rename
+- [x] settings.py, stream.py, archive.py, utils.py(`extract_twitter_id` → `extract_x_id`), discord_bot.py: 각 파일 rename
+- [x] `client.ts`: Platform 타입, PLATFORM_LABELS, PlatformStatus, `TwitterSettingsUpdate` → `XSettingsUpdate`, API 함수명/엔드포인트
+- [x] `Settings.tsx`: 상태 변수, 핸들러, UI 텍스트, developer.twitter.com → developer.x.com
+- [x] `Dashboard.tsx`, `Archive.tsx`: 플랫폼 키, 컴포넌트명, UI 텍스트
+- [x] TypeScript `tsc --noEmit` 통과 (에러 없음)
+- ⚠️ 주의: `"twitter_spaces"` composite key로 저장된 기존 채널 데이터는 `"x_spaces"`로 마이그레이션 필요 (재등록)
+- ⚠️ 주의: 기존 `data/twitter_cookies.txt` 쿠키 파일은 UI에서 재업로드 필요
+
 ## 2026-02-13: 채널 카드 UX 개선
 
 - [x] 백엔드: 치지직 API에서 `liveImageUrl`, `channelImageUrl` 추출 추가 (`downloader.py`)
@@ -173,6 +191,27 @@
   - FileListView: 채널별 그룹화, 파일명/날짜/메시지수/크기 표시, 다운로드 버튼 (stopPropagation)
   - MessageViewer: 뒤로가기, 키워드/닉네임 검색 (Enter 또는 버튼), 페이지네이션, user_role 배지
 - [x] TypeScript 빌드 검증 통과
+
+---
+
+## 2026-03-25: Twitter Spaces 쿠키 파일 업로드 UI + 사이드바 이탈 경고
+
+### Bug 1: Twitter 저장 후 오작동하는 "미저장 변경사항" 경고
+- [x] `twitterCookieFile` 경로 직접 입력 방식 제거
+- [x] `POST /api/platforms/twitter/cookie` — UploadFile 수신 후 `data/twitter_cookies.txt` 저장 (`platforms.py`)
+- [x] `DELETE /api/platforms/twitter/cookie` — 파일 삭제 및 `.env` 초기화 (`platforms.py`)
+- [x] `TwitterSettingsRequest`에서 `cookie_file` 필드 제거, `PUT /settings/twitter` 간소화
+- [x] `client.ts`: `uploadTwitterCookie`, `deleteTwitterCookie` 함수 추가, `TwitterSettingsUpdate` 수정
+- [x] `Settings.tsx`: `twitterCookieFile` state 제거 → `twitterCookieFileSet` / `twitterCookieUploading` state로 교체
+- [x] `isTabDirty("auth")`: `twitterCookieFile` 조건 제거
+- [x] `loadSettings()`: `getPlatformStatus()` 병렬 호출로 `cookie_file_set` 초기 로드
+- [x] 쿠키 파일 UI: 텍스트 입력 → 상태 배지 + 파일 선택 버튼 + 삭제 버튼
+- [x] TypeScript 빌드 검증 통과
+
+### Bug 2: 사이드바 이탈 시 경고 없이 페이지 이동
+- [x] `Settings.tsx`: `useBlocker` (React Router v7) 추가
+- [x] dirty 탭이 있을 때 페이지 이탈 시 confirm 모달 표시
+- [x] 확인 → `blocker.proceed()`, 취소 → `blocker.reset()`
 
 ---
 
@@ -508,3 +547,39 @@
 
 ### 문서
 - [x] `docs/done-twitter-spaces-manual-capture.md`: 구현 완료 문서
+
+## 2026-03-24: WebUI 리팩토링 1단계 (Phase 1)
+
+### 백엔드
+- [x] `backend/app/engine/conductor.py`, `backend/app/services/recorder.py`에 전체 중단 로직 구현
+- [x] `backend/app/api/stream.py`에 `POST /api/stream/record/stop-all` 추가
+
+### 프론트엔드
+- [x] `Dashboard.tsx`: 퀵 필터, Grid/List 토글, 전체 중지 버튼, 스켈레톤 마크업 적용
+- [x] `Settings.tsx`: 인증 상태 뱃지 표시 추가
+- [x] `VodDownload.tsx`: 스켈레톤 디자인 마크업 추가
+- [x] `Sidebar.tsx`: 사이드바 하단 VOD 다운로드 미니 위젯 연동
+- [x] `ConfirmModal.tsx`: 파괴적 동작 방어 로직(`requireTyping`) 및 디자인 개선
+- [x] `index.css`: 진행 중인 항목 하이라이트를 위한 `pulse-border` 애니메이션 추가
+
+### 문서
+- [x] `docs/plan-webui-refactoring.md` 수립 및 1단계 결과물 `walkthrough.md` 생성
+
+## 2026-03-26: 자동녹화 토글 버그 수정 + SSE 실시간 동기화
+
+### 문제 (버그 3건)
+1. **자동녹화 토글 "불가능" 현상 재발**: 녹화 시작/종료 시 SSE 미방송으로 프론트 상태가 stale 유지 → 토글 클릭 시 상태가 갑자기 바뀌어 "동작 안 하는 것처럼" 보이는 UX 버그
+2. **수동 정지 후 자동 재녹화**: `stop_manual_recording` 후 `task.pipeline.state = COMPLETED` 상태가 남아있어 모니터 루프의 자동 재시작 로직이 발동 (auto_record=True인 경우)
+3. **X Spaces Stop 버튼 미표시**: `get_all_status()`의 X Spaces recording dict에 `is_recording` 필드 없음
+
+### 수정 내용 (`backend/app/engine/conductor.py`)
+- [x] `_stop_recording()`: 함수 끝에 `task.pipeline = None` + `broadcast_event` 추가
+- [x] `_start_recording()`: try/except 끝에 `broadcast_event` 추가
+- [x] `_start_spaces_recording()`: try/except 끝에 `broadcast_event` 추가
+- [x] `_stop_spaces_recording()`: 함수 끝에 `broadcast_event` 추가
+- [x] `get_all_status()`: X Spaces recording dict에 `"is_recording": True` 추가
+
+### 검증
+- FFmpeg 오류 자동 재시작 로직 (`ERROR` 상태)은 `_stop_recording` 경로를 통하지 않으므로 영향 없음
+- `stop_manual_recording`의 `return pipe.get_status()`는 로컬 변수 `pipe` 사용으로 안전
+- `docs/plan-recording-sse-fix.md`, `docs/done-recording-sse-fix.md` 작성

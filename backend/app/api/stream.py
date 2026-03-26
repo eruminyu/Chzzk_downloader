@@ -23,7 +23,7 @@ def _to_composite_key(raw: str) -> str:
     - chzzk URL 형식도 extract_channel_id로 ID만 추출 후 chzzk 키로 변환
     """
     # 알려진 플랫폼 접두사가 있으면 composite_key로 간주
-    for prefix in ("chzzk:", "twitcasting:", "twitter_spaces:"):
+    for prefix in ("chzzk:", "twitcasting:", "x_spaces:"):
         if raw.startswith(prefix):
             return raw
     # 레거시: 순수 chzzk ID 또는 chzzk URL
@@ -120,6 +120,17 @@ async def stop_recording(channel_id: str):
 
     try:
         return await service.stop_recording(composite_key)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/record/stop-all", summary="모든 녹화 중지")
+async def stop_all_recordings():
+    """현재 진행 중인 모든 채널의 녹화를 중지합니다."""
+    from app.main import get_recorder_service
+
+    service = get_recorder_service()
+    try:
+        return await service.stop_all_recordings()
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

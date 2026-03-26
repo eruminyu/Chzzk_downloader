@@ -257,11 +257,16 @@ class DiscordBotService:
         @bot.event
         async def on_ready() -> None:
             logger.info(f"🤖 Discord Bot 로그인: {bot.user}")
-            try:
-                synced = await bot.tree.sync()
-                logger.info(f"🤖 슬래시 커맨드 동기화 완료: {len(synced)}개")
-            except Exception as e:
-                logger.error(f"슬래시 커맨드 동기화 실패: {e}")
+            # 글로벌 sync()는 전파에 최대 1시간 소요 → 서버별 즉시 동기화로 대체
+            total = 0
+            for guild in bot.guilds:
+                try:
+                    bot.tree.copy_global_to(guild=guild)
+                    synced = await bot.tree.sync(guild=guild)
+                    total += len(synced)
+                except Exception as e:
+                    logger.error(f"슬래시 커맨드 동기화 실패 ({guild.name}): {e}")
+            logger.info(f"🤖 슬래시 커맨드 동기화 완료: {total}개 (서버별 즉시 적용)")
 
         @bot.command(name="status")
         async def cmd_status(ctx: commands.Context) -> None:
@@ -368,11 +373,11 @@ class DiscordBotService:
                 embed=_make_embed("⏹ 녹화 중지", f"**{display_name}**\n자동 녹화 OFF", "blue")
             )
 
-        # ── Twitter Spaces 전용 커맨드 ────────────────────────────
+        # ── X Spaces 전용 커맨드 ────────────────────────────
 
         @bot.command(name="spaces")
         async def cmd_spaces(ctx: commands.Context) -> None:
-            """캡처된 Twitter Spaces m3u8 목록: !spaces."""
+            """캡처된 X Spaces m3u8 목록: !spaces."""
             embed, err = _get_spaces_embed()
             if err:
                 await ctx.send(err)
@@ -381,13 +386,13 @@ class DiscordBotService:
 
         @bot.command(name="download-space")
         async def cmd_download_space(ctx: commands.Context, *, url: str = "") -> None:
-            """Twitter Spaces m3u8 URL 다운로드: !download-space <url>."""
+            """X Spaces m3u8 URL 다운로드: !download-space <url>."""
             if not url:
                 await ctx.send("❓ 사용법: `!download-space <m3u8_url>`")
                 return
             await ctx.send(embed=await _do_download_space(url))
 
-        @bot.tree.command(name="spaces", description="캡처된 Twitter Spaces m3u8 URL 목록을 표시합니다")
+        @bot.tree.command(name="spaces", description="캡처된 X Spaces m3u8 URL 목록을 표시합니다")
         async def slash_spaces(interaction: discord.Interaction) -> None:
             embed, err = _get_spaces_embed()
             if err:
@@ -395,7 +400,7 @@ class DiscordBotService:
             else:
                 await interaction.response.send_message(embed=embed)
 
-        @bot.tree.command(name="download-space", description="Twitter Spaces m3u8 URL로 다운로드를 시작합니다")
+        @bot.tree.command(name="download-space", description="X Spaces m3u8 URL로 다운로드를 시작합니다")
         @app_commands.describe(url="m3u8 URL (캡처된 URL 또는 직접 입력)")
         async def slash_download_space(
             interaction: discord.Interaction,
@@ -407,14 +412,14 @@ class DiscordBotService:
 
         @bot.command(name="capture-space")
         async def cmd_capture_space(ctx: commands.Context, username: str = "") -> None:
-            """Twitter Spaces m3u8 URL 즉시 캡처: !capture-space <username>."""
+            """X Spaces m3u8 URL 즉시 캡처: !capture-space <username>."""
             if not username:
                 await ctx.send("❓ 사용법: `!capture-space <username>` (@ 없는 핸들)")
                 return
             await ctx.send(embed=await _do_capture_space(username))
 
-        @bot.tree.command(name="capture-space", description="Twitter Spaces m3u8 URL을 즉시 1회 조회합니다 (자동 감지 대체)")
-        @app_commands.describe(username="Twitter 계정 핸들 (@ 제외, 예: KalserianT)")
+        @bot.tree.command(name="capture-space", description="X Spaces m3u8 URL을 즉시 1회 조회합니다 (자동 감지 대체)")
+        @app_commands.describe(username="X 계정 핸들 (@ 제외, 예: KalserianT)")
         async def slash_capture_space(
             interaction: discord.Interaction,
             username: str,
@@ -430,13 +435,13 @@ class DiscordBotService:
             channels = self._service.get_channels()
             spaces = [
                 ch for ch in channels
-                if ch.get("platform") == "twitter_spaces" and ch.get("captured_m3u8_url")
+                if ch.get("platform") == "x_spaces" and ch.get("captured_m3u8_url")
             ]
             if not spaces:
-                return None, "📭 캡처된 Twitter Spaces m3u8 URL이 없습니다."
+                return None, "📭 캡처된 X Spaces m3u8 URL이 없습니다."
 
             embed = discord.Embed(
-                title="🎙️ 캡처된 Twitter Spaces",
+                title="🎙️ 캡처된 X Spaces",
                 color=discord.Color.blue(),
             )
             for sp in spaces:
@@ -460,7 +465,7 @@ class DiscordBotService:
                 task_id = await self._service.download_vod(url=url)
                 return _make_embed(
                     "⬇️ 다운로드 시작",
-                    f"Twitter Spaces 다운로드가 시작되었습니다.",
+                    f"X Spaces 다운로드가 시작되었습니다.",
                     "green",
                     fields={"task_id": str(task_id), "URL": url[:100]},
                 )
@@ -472,7 +477,7 @@ class DiscordBotService:
                 )
 
         async def _do_capture_space(username: str) -> discord.Embed:
-            """Twitter Spaces m3u8 URL을 즉시 1회 조회하고 결과 Embed를 반환한다."""
+            """X Spaces m3u8 URL을 즉시 1회 조회하고 결과 Embed를 반환한다."""
             try:
                 result = await self._service.capture_space(username)
             except Exception as e:

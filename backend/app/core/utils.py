@@ -69,8 +69,8 @@ def extract_twitcasting_id(value: str) -> str:
     return value
 
 
-def extract_twitter_id(value: str) -> str:
-    """Twitter/X URL 또는 순수 유저 ID에서 유저 ID만 추출한다.
+def extract_x_id(value: str) -> str:
+    """X URL 또는 순수 유저 ID에서 유저 ID만 추출한다.
 
     지원 형식:
         - https://x.com/someuser

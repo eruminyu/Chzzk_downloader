@@ -10,6 +10,7 @@ interface ConfirmOptions {
     confirmText?: string;
     cancelText?: string;
     variant?: "danger" | "default";
+    requireTyping?: string;
 }
 
 interface ConfirmContextValue {
@@ -77,9 +78,11 @@ function ConfirmModal({
     confirmText = "확인",
     cancelText = "취소",
     variant = "default",
+    requireTyping,
     onConfirm,
     onCancel,
 }: ConfirmModalProps) {
+    const [inputValue, setInputValue] = useState("");
     const confirmBtnRef = useRef<HTMLButtonElement>(null);
 
     useEffect(() => {
@@ -93,6 +96,7 @@ function ConfirmModal({
     }, [onCancel]);
 
     const isDanger = variant === "danger";
+    const isMatch = requireTyping ? inputValue === requireTyping : true;
 
     return (
         <div
@@ -104,7 +108,7 @@ function ConfirmModal({
 
             {/* Modal */}
             <div
-                className="relative bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl p-6 w-full max-w-sm mx-4 animate-modal-in"
+                className="relative bg-zinc-900/80 backdrop-blur-md border border-zinc-700/50 rounded-2xl shadow-2xl p-6 w-full max-w-sm mx-4 animate-modal-in"
                 onClick={(e) => e.stopPropagation()}
             >
                 <div className="flex items-start gap-4 mb-5">
@@ -119,6 +123,22 @@ function ConfirmModal({
                     </div>
                 </div>
 
+                {requireTyping && (
+                    <div className="mb-5">
+                        <label className="block text-xs text-zinc-400 mb-2">
+                            계속하려면 <strong className="text-white">'{requireTyping}'</strong>을(를) 입력하세요.
+                        </label>
+                        <input
+                            type="text"
+                            value={inputValue}
+                            onChange={(e) => setInputValue(e.target.value)}
+                            className="w-full bg-zinc-950/50 border border-zinc-700/50 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-red-500 transition-colors"
+                            placeholder={requireTyping}
+                            autoFocus
+                        />
+                    </div>
+                )}
+
                 <div className="flex gap-3 justify-end">
                     <button
                         onClick={onCancel}
@@ -129,8 +149,9 @@ function ConfirmModal({
                     <button
                         ref={confirmBtnRef}
                         onClick={onConfirm}
+                        disabled={!isMatch}
                         className={clsx(
-                            "px-4 py-2 rounded-lg text-sm font-bold transition-colors",
+                            "px-4 py-2 rounded-lg text-sm font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed",
                             isDanger
                                 ? "bg-red-600 hover:bg-red-500 text-white"
                                 : "bg-green-600 hover:bg-green-500 text-white",

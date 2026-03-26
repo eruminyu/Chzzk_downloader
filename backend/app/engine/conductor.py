@@ -1,7 +1,7 @@
 """
 Chzzk-Recorder-Pro: Conductor (비동기 오케스트레이터)
 다중 채널 감시 루프를 관리하고, 방송 시작 시 자동 녹화를 트리거한다.
-멀티 플랫폼(Chzzk, TwitCasting, Twitter Spaces)을 단일 Conductor로 통합 관리한다.
+멀티 플랫폼(Chzzk, TwitCasting, X Spaces)을 단일 Conductor로 통합 관리한다.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ from app.engine.pipeline import FFmpegPipeline, RecordingState
 if TYPE_CHECKING:
     from app.services.discord_bot import DiscordBotService
     from app.engine.twitcasting import TwitcastingEngine
-    from app.engine.twitter_spaces import TwitterSpacesEngine
+    from app.engine.x_spaces import XSpacesEngine
 
 
 @dataclass
@@ -44,10 +44,12 @@ class ChannelTask:
     viewer_count: int = 0
     thumbnail_url: Optional[str] = None
     profile_image_url: Optional[str] = None
-    # Twitter Spaces 전용
+    tags: list[str] = field(default_factory=list)
+    last_error: Optional[str] = None
+    # X Spaces 전용
     spaces_process: Optional[asyncio.subprocess.Process] = field(default=None, repr=False)
     _current_space_id: Optional[str] = None
-    # Twitter Spaces 전용: 라이브 중 캡처한 m3u8 URL (Space 종료 후 다운로드용)
+    # X Spaces 전용: 라이브 중 캡처한 m3u8 URL (Space 종료 후 다운로드용)
     captured_m3u8_url: Optional[str] = None
     captured_m3u8_at: Optional[str] = None  # 캡처 시각 (ISO 포맷)
 
@@ -56,7 +58,7 @@ class Conductor:
     """비동기 오케스트레이터.
 
     Python asyncio를 활용하여 단일 스레드로 수십 개의 채널을 동시 감시한다.
-    Chzzk, TwitCasting, Twitter Spaces를 통합 관리한다.
+    Chzzk, TwitCasting, X Spaces를 통합 관리한다.
 
     채널 키 형식: "platform:channel_id" (예: "chzzk:abc123", "twitcasting:someuser")
     기존 Chzzk 전용 키("abc123")는 자동으로 "chzzk:abc123"으로 마이그레이션된다.
@@ -76,18 +78,20 @@ class Conductor:
         auth: Optional[AuthManager] = None,
         discord_bot: Optional[DiscordBotService] = None,
     ) -> None:
+        settings = get_settings()
         self._auth = auth or AuthManager()
         self._chzzk_engine = StreamLinkEngine(auth=self._auth)
         self._twitcasting_engine: Optional[TwitcastingEngine] = None
-        self._twitter_spaces_engine: Optional[TwitterSpacesEngine] = None
+        self._x_spaces_engine: Optional[XSpacesEngine] = None
         self._channels: dict[str, ChannelTask] = {}
         self._running = False
-        self._persistence_path = Path("data/channels.json")
+        self._persistence_path = Path(settings.download_dir) / "channels.json"
         self._discord_bot = discord_bot
+        self._event_queues: list[asyncio.Queue] = []
         # 라이브 감지 이력: composite_key → 날짜 문자열 set (하루 1회 카운트)
         self._live_detections: dict[str, set[str]] = {}
-        self._live_history_path = Path("data/live_history.json")
-        # Twitter 쿠키 유효성 상태
+        self._live_history_path = Path(settings.download_dir) / "live_history.json"
+        # X 쿠키 유효성 상태
         self._cookie_status: dict = {"valid": True, "checked_at": None, "reason": None}
         self._last_cookie_check: Optional[datetime] = None
         self._cookie_check_task: Optional[asyncio.Task] = None
@@ -102,11 +106,11 @@ class Conductor:
                 from app.engine.twitcasting import TwitcastingEngine
                 self._twitcasting_engine = TwitcastingEngine()
             return self._twitcasting_engine
-        elif platform == Platform.TWITTER_SPACES:
-            if self._twitter_spaces_engine is None:
-                from app.engine.twitter_spaces import TwitterSpacesEngine
-                self._twitter_spaces_engine = TwitterSpacesEngine()
-            return self._twitter_spaces_engine
+        elif platform == Platform.X_SPACES:
+            if self._x_spaces_engine is None:
+                from app.engine.x_spaces import XSpacesEngine
+                self._x_spaces_engine = XSpacesEngine()
+            return self._x_spaces_engine
         else:
             raise ValueError(f"지원하지 않는 플랫폼: {platform}")
 
@@ -176,6 +180,15 @@ class Conductor:
         logger.info(f"[{composite_key}] 자동 녹화 {'ON' if value else 'OFF'}")
         self._save_persistence()
 
+    def set_channel_tags(self, composite_key: str, tags: list[str]) -> None:
+        """채널의 태그를 지정한다."""
+        task = self._channels.get(composite_key)
+        if task is None:
+            raise ValueError(f"채널 '{composite_key}'을(를) 찾을 수 없습니다.")
+        task.tags = tags
+        logger.info(f"[{composite_key}] 태그 변경: {tags}")
+        self._save_persistence()
+
     def toggle_auto_record(self, composite_key: str) -> bool:
         """채널의 자동 녹화 설정을 토글한다.
 
@@ -194,7 +207,7 @@ class Conductor:
         if (
             task.auto_record
             and task.is_live
-            and task.platform != Platform.TWITTER_SPACES
+            and task.platform != Platform.X_SPACES
             and (task.pipeline is None or task.pipeline.state != RecordingState.RECORDING)
         ):
             logger.info(f"[{composite_key}] 라이브 중 자동 녹화 ON → 즉시 녹화 시작")
@@ -217,7 +230,7 @@ class Conductor:
             logger.info(f"[{composite_key}] 채널 제거 전 녹화 정지 중...")
             await self._stop_recording(composite_key)
 
-        # Twitter Spaces 녹화 프로세스 종료
+        # X Spaces 녹화 프로세스 종료
         if task.spaces_process is not None:
             await self._stop_spaces_recording(composite_key)
 
@@ -251,6 +264,9 @@ class Conductor:
         self._running = False
         logger.info("Conductor 종료 요청...")
 
+        # 모든 이벤트 큐 종료 신호 전송
+        self.broadcast_event("shutdown")
+
         for composite_key, task in self._channels.items():
             pipe = task.pipeline
             if pipe is not None and pipe.state == RecordingState.RECORDING:
@@ -269,7 +285,7 @@ class Conductor:
         logger.info("Conductor 종료 완료.")
 
     async def _cookie_check_loop(self) -> None:
-        """Twitter 쿠키 유효성을 하루 1회 주기로 검증한다."""
+        """X 쿠키 유효성을 하루 1회 주기로 검증한다."""
         while self._running:
             try:
                 # 마지막 검증 이후 24시간이 지났을 때만 실행
@@ -278,7 +294,7 @@ class Conductor:
                     self._last_cookie_check is None
                     or (now - self._last_cookie_check).total_seconds() >= self._COOKIE_CHECK_INTERVAL
                 ):
-                    await self._check_twitter_cookie()
+                    await self._check_x_cookie()
             except asyncio.CancelledError:
                 break
             except Exception as e:
@@ -287,16 +303,16 @@ class Conductor:
             # 1시간마다 깨어나서 24시간 경과 여부 확인
             await asyncio.sleep(3600)
 
-    async def _check_twitter_cookie(self) -> None:
-        """Twitter 쿠키 유효성을 검증하고 만료 시 Discord 알림을 전송한다."""
-        from app.engine.twitter_spaces import verify_cookie
+    async def _check_x_cookie(self) -> None:
+        """X 쿠키 유효성을 검증하고 만료 시 Discord 알림을 전송한다."""
+        from app.engine.x_spaces import verify_cookie
 
         settings = get_settings()
-        cookie_file = settings.twitter_cookie_file
+        cookie_file = settings.x_cookie_file
 
-        # Twitter Spaces 채널이 없으면 검증 생략
+        # X Spaces 채널이 없으면 검증 생략
         has_spaces = any(
-            t.platform == Platform.TWITTER_SPACES for t in self._channels.values()
+            t.platform == Platform.X_SPACES for t in self._channels.values()
         )
         if not has_spaces:
             return
@@ -310,21 +326,21 @@ class Conductor:
             self._last_cookie_check = datetime.now()
             return
 
-        logger.info("Twitter 쿠키 유효성 검증 중...")
+        logger.info("X 쿠키 유효성 검증 중...")
         result = await verify_cookie(cookie_file)
         prev_valid = self._cookie_status.get("valid", True)
         self._cookie_status = result
         self._last_cookie_check = datetime.now()
 
         if not result["valid"]:
-            logger.warning(f"Twitter 쿠키 만료 감지: {result.get('reason')}")
+            logger.warning(f"X 쿠키 만료 감지: {result.get('reason')}")
             # 이전에 유효했거나 처음 감지된 경우에만 Discord 알림 (반복 알림 방지)
             if prev_valid and self._discord_bot:
                 try:
                     await self._discord_bot.send_notification(
-                        title="⚠️ Twitter 쿠키 만료",
+                        title="⚠️ X 쿠키 만료",
                         description=(
-                            "Twitter Spaces 쿠키가 만료되었습니다.\n"
+                            "X Spaces 쿠키가 만료되었습니다.\n"
                             "설정 페이지에서 쿠키 파일을 갱신해주세요."
                         ),
                         color="red",
@@ -333,14 +349,14 @@ class Conductor:
                 except Exception as e:
                     logger.error(f"쿠키 만료 Discord 알림 전송 실패: {e}")
         else:
-            logger.info("Twitter 쿠키 유효성 확인 완료: 정상")
+            logger.info("X 쿠키 유효성 확인 완료: 정상")
 
     def get_cookie_status(self) -> dict:
-        """Twitter 쿠키 유효성 상태를 반환한다."""
+        """X 쿠키 유효성 상태를 반환한다."""
         return dict(self._cookie_status)
 
     async def capture_space(self, username: str) -> dict:
-        """Twitter Spaces 채널의 m3u8 URL을 즉시 1회 조회한다.
+        """X Spaces 채널의 m3u8 URL을 즉시 1회 조회한다.
 
         Discord /capture-space 커맨드에서 호출. 레이트 리밋 문제로 자동 폴링을
         비활성화한 대신 사용자가 원하는 시점에 수동으로 캡처를 트리거한다.
@@ -354,7 +370,7 @@ class Conductor:
                 "channel_name": str | None,
             }
         """
-        composite_key = self.make_composite_key(Platform.TWITTER_SPACES, username)
+        composite_key = self.make_composite_key(Platform.X_SPACES, username)
         task = self._channels.get(composite_key)
 
         if task is None:
@@ -362,7 +378,7 @@ class Conductor:
                     "title": None, "channel_name": None, "error": f"등록되지 않은 채널: {username}"}
 
         try:
-            engine = self._get_engine(Platform.TWITTER_SPACES)
+            engine = self._get_engine(Platform.X_SPACES)
             status = await engine.check_live_status(username)
         except Exception as e:
             logger.error(f"[{composite_key}] capture_space 조회 실패: {e}")
@@ -401,14 +417,38 @@ class Conductor:
                     "auto_record": t.auto_record,
                     "captured_m3u8_url": t.captured_m3u8_url,
                     "captured_m3u8_at": t.captured_m3u8_at,
+                    "tags": t.tags,
                 }
                 for key, t in self._channels.items()
             }
             with open(self._persistence_path, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=4, ensure_ascii=False)
             logger.debug(f"채널 목록 저장 완료: {self._persistence_path}")
+            self.broadcast_event("status_update", self.get_all_status())
         except Exception as e:
             logger.error(f"채널 목록 저장 실패: {e}")
+
+    # ── SSE 이벤트 Pub-Sub ─────────────────────────────────
+
+    def add_event_queue(self, queue: asyncio.Queue) -> None:
+        self._event_queues.append(queue)
+
+    def remove_event_queue(self, queue: asyncio.Queue) -> None:
+        if queue in self._event_queues:
+            self._event_queues.remove(queue)
+
+    def broadcast_event(self, event_type: str, data: Optional[dict | list] = None) -> None:
+        if not self._event_queues:
+            return
+        payload = {"type": event_type}
+        if data is not None:
+            payload["data"] = data
+        msg = f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+        for q in self._event_queues:
+            try:
+                q.put_nowait(msg)
+            except asyncio.QueueFull:
+                pass
 
     def _load_persistence(self) -> None:
         """파일에서 채널 목록을 로드한다.
@@ -444,9 +484,12 @@ class Conductor:
                 # m3u8 캡처 URL 복원
                 composite_key_restored = self.make_composite_key(platform, channel_id)
                 restored_task = self._channels.get(composite_key_restored)
-                if restored_task and platform.value == "twitter_spaces":
-                    restored_task.captured_m3u8_url = config.get("captured_m3u8_url")
-                    restored_task.captured_m3u8_at = config.get("captured_m3u8_at")
+                if restored_task:
+                    if platform.value == "x_spaces":
+                        restored_task.captured_m3u8_url = config.get("captured_m3u8_url")
+                        restored_task.captured_m3u8_at = config.get("captured_m3u8_at")
+                    if "tags" in config:
+                        restored_task.tags = config.get("tags", [])
 
             if migrated:
                 # 마이그레이션된 경우 새 포맷으로 즉시 저장
@@ -462,11 +505,11 @@ class Conductor:
         settings = get_settings()
         task = self._channels.get(composite_key)
 
-        # Twitter Spaces는 비공식 GraphQL API 레이트 리밋 문제로 자동 폴링 비활성화
+        # X Spaces는 비공식 GraphQL API 레이트 리밋 문제로 자동 폴링 비활성화
         # Discord /capture-space 커맨드로 수동 트리거
-        if task and task.platform == Platform.TWITTER_SPACES:
+        if task and task.platform == Platform.X_SPACES:
             logger.info(
-                f"[{composite_key}] Twitter Spaces 수동 캡처 모드 — "
+                f"[{composite_key}] X Spaces 수동 캡처 모드 — "
                 "자동 감시 없음. Discord `/capture-space` 커맨드로 m3u8 URL을 수동으로 캡처하세요."
             )
             return
@@ -488,6 +531,7 @@ class Conductor:
 
                 was_live = task.is_live
                 task.is_live = status["is_live"]
+                task.last_error = None
                 task.channel_name = status.get("channel_name")
                 task.title = status.get("title")
                 task.category = status.get("category")
@@ -495,8 +539,8 @@ class Conductor:
                 task.thumbnail_url = status.get("thumbnail_url")
                 task.profile_image_url = status.get("profile_image_url")
 
-                # Twitter Spaces: space_id 및 m3u8_url 업데이트
-                if task.platform == Platform.TWITTER_SPACES:
+                # X Spaces: space_id 및 m3u8_url 업데이트
+                if task.platform == Platform.X_SPACES:
                     task._current_space_id = status.get("space_id")
                     # m3u8 URL이 새로 캡처되면 저장 (기존 URL 덮어쓰지 않음 — 더 오래 유효할 수 있음)
                     new_m3u8 = status.get("m3u8_url")
@@ -512,7 +556,7 @@ class Conductor:
                         if self._discord_bot:
                             try:
                                 await self._discord_bot.send_notification(
-                                    title="🎙️ Twitter Spaces m3u8 캡처",
+                                    title="🎙️ X Spaces m3u8 캡처",
                                     description=(
                                         f"**{task.channel_name or task.channel_id}**의 "
                                         f"Space m3u8 URL이 캡처되었습니다.\n"
@@ -578,7 +622,7 @@ class Conductor:
                         logger.error(f"[{composite_key}] 채팅 아카이빙 동적 시작 실패: {e}")
 
                 # ── 녹화 오류 시 자동 재시작 (Chzzk/TwitCasting 전용) ──
-                elif status["is_live"] and task.auto_record and task.platform != Platform.TWITTER_SPACES:
+                elif status["is_live"] and task.auto_record and task.platform != Platform.X_SPACES:
                     pipe = task.pipeline
                     if pipe is not None and pipe.state in (RecordingState.ERROR, RecordingState.COMPLETED):
                         if retry_count < max_retries:
@@ -595,6 +639,7 @@ class Conductor:
                             )
                         elif retry_count == max_retries:
                             retry_count += 1
+                            task.last_error = "최대 재시도 횟수 초과로 녹화 중단됨"
                             logger.error(
                                 f"[{composite_key}] 최대 재시도 횟수 초과. "
                                 f"녹화 시작 버튼으로 수동 재시작하세요."
@@ -603,6 +648,7 @@ class Conductor:
             except asyncio.CancelledError:
                 break
             except BaseException as e:
+                task.last_error = f"감시 오류: {str(e)}"
                 logger.error(f"[{composite_key}] 감시 오류: {e}", exc_info=e)
 
             await asyncio.sleep(interval)
@@ -613,8 +659,8 @@ class Conductor:
         if task is None:
             return
 
-        # Twitter Spaces 녹화 중지
-        if task.platform == Platform.TWITTER_SPACES:
+        # X Spaces 녹화 중지
+        if task.platform == Platform.X_SPACES:
             await self._stop_spaces_recording(composite_key)
             return
 
@@ -658,6 +704,11 @@ class Conductor:
             except Exception as e:
                 logger.error(f"[{composite_key}] 채팅 아카이빙 중지 실패: {e}")
 
+        # 파이프라인 레퍼런스 정리 (모니터 루프의 의도치 않은 자동 재시작 방지)
+        task.pipeline = None
+        # 정지 후 프론트엔드에 즉시 상태 업데이트
+        self.broadcast_event("status_update", self.get_all_status())
+
     async def _start_recording(
         self,
         composite_key: str,
@@ -669,8 +720,8 @@ class Conductor:
         if task is None:
             return
 
-        # Twitter Spaces는 별도 경로
-        if task.platform == Platform.TWITTER_SPACES:
+        # X Spaces는 별도 경로
+        if task.platform == Platform.X_SPACES:
             await self._start_spaces_recording(composite_key, channel_name=channel_name, title=title)
             return
 
@@ -719,6 +770,7 @@ class Conductor:
                 except Exception as e:
                     logger.error(f"[{composite_key}] 채팅 아카이빙 시작 실패: {e}")
         except Exception as e:
+            task.last_error = f"녹화 시작 오류: {str(e)}"
             logger.error(f"[{composite_key}] 녹화 시작 실패: {e}")
 
             if self._discord_bot:
@@ -731,13 +783,16 @@ class Conductor:
                 except Exception as notify_err:
                     logger.error(f"[{composite_key}] Discord 녹화 실패 알림 전송 실패: {notify_err}")
 
+        # 녹화 시작/실패 후 프론트엔드에 즉시 상태 업데이트
+        self.broadcast_event("status_update", self.get_all_status())
+
     async def _start_spaces_recording(
         self,
         composite_key: str,
         channel_name: Optional[str] = None,
         title: Optional[str] = None,
     ) -> None:
-        """Twitter Spaces를 yt-dlp subprocess로 녹화 시작한다."""
+        """X Spaces를 yt-dlp subprocess로 녹화 시작한다."""
         task = self._channels.get(composite_key)
         if task is None:
             return
@@ -746,8 +801,8 @@ class Conductor:
             return
 
         try:
-            from app.engine.twitter_spaces import TwitterSpacesEngine
-            engine: TwitterSpacesEngine = self._get_engine(Platform.TWITTER_SPACES)
+            from app.engine.x_spaces import XSpacesEngine
+            engine: XSpacesEngine = self._get_engine(Platform.X_SPACES)
 
             settings = get_settings()
             process = await engine.start_ytdlp_recording(
@@ -755,10 +810,10 @@ class Conductor:
                 output_dir=settings.download_dir,
                 channel_name=channel_name or task.channel_name or task.channel_id,
                 title=title or task.title,
-                cookie_file=settings.twitter_cookie_file,
+                cookie_file=settings.x_cookie_file,
             )
             task.spaces_process = process
-            logger.info(f"[{composite_key}] Twitter Spaces 녹화 시작 (space_id={task._current_space_id}).")
+            logger.info(f"[{composite_key}] X Spaces 녹화 시작 (space_id={task._current_space_id}).")
 
             if self._discord_bot:
                 try:
@@ -766,15 +821,19 @@ class Conductor:
                         title="🔴 Spaces 녹화 시작",
                         description=f"채널: **{channel_name or composite_key}**\n제목: {title or 'N/A'}",
                         color="green",
-                        fields={"플랫폼": "Twitter Spaces"},
+                        fields={"플랫폼": "X Spaces"},
                     )
                 except Exception as e:
                     logger.error(f"[{composite_key}] Discord Spaces 녹화 시작 알림 전송 실패: {e}")
         except Exception as e:
+            task.last_error = f"Spaces 녹화 오류: {str(e)}"
             logger.error(f"[{composite_key}] Spaces 녹화 시작 실패: {e}")
 
+        # 녹화 시작/실패 후 프론트엔드에 즉시 상태 업데이트
+        self.broadcast_event("status_update", self.get_all_status())
+
     async def _stop_spaces_recording(self, composite_key: str) -> None:
-        """Twitter Spaces yt-dlp 프로세스를 종료한다."""
+        """X Spaces yt-dlp 프로세스를 종료한다."""
         task = self._channels.get(composite_key)
         if task is None or task.spaces_process is None:
             return
@@ -792,6 +851,9 @@ class Conductor:
             logger.info(f"[{composite_key}] Spaces 녹화 중지.")
         except Exception as e:
             logger.error(f"[{composite_key}] Spaces 녹화 중지 실패: {e}")
+
+        # 정지 후 프론트엔드에 즉시 상태 업데이트
+        self.broadcast_event("status_update", self.get_all_status())
 
     async def start_manual_recording(self, composite_key: str) -> dict:
         """수동으로 특정 채널의 녹화를 시작한다."""
@@ -816,14 +878,14 @@ class Conductor:
             status = await engine.check_live_status(task.channel_id)
             task.channel_name = status.get("channel_name")
             task.title = status.get("title")
-            if task.platform == Platform.TWITTER_SPACES:
+            if task.platform == Platform.X_SPACES:
                 task._current_space_id = status.get("space_id")
         except Exception:
             pass
 
         await self._start_recording(composite_key)
 
-        if task.platform == Platform.TWITTER_SPACES:
+        if task.platform == Platform.X_SPACES:
             return {"message": "Spaces 녹화 시작됨.", "space_id": task._current_space_id}
 
         pipe = task.pipeline
@@ -837,7 +899,7 @@ class Conductor:
         if task is None:
             return {"error": "녹화 중인 채널이 아닙니다."}
 
-        if task.platform == Platform.TWITTER_SPACES:
+        if task.platform == Platform.X_SPACES:
             await self._stop_spaces_recording(composite_key)
             return {"message": "Spaces 녹화 중지됨."}
 
@@ -847,6 +909,19 @@ class Conductor:
 
         await self._stop_recording(composite_key)
         return pipe.get_status()
+
+    async def stop_all_recordings(self) -> dict:
+        """현재 진행 중인 모든 채널의 녹화를 중지한다."""
+        stopped_count = 0
+        for composite_key, task in list(self._channels.items()):
+            if task.platform == Platform.X_SPACES and task.spaces_process is not None:
+                await self._stop_spaces_recording(composite_key)
+                stopped_count += 1
+            elif task.pipeline is not None and task.pipeline.state == RecordingState.RECORDING:
+                await self._stop_recording(composite_key)
+                stopped_count += 1
+
+        return {"stopped_count": stopped_count, "message": f"{stopped_count}개의 채널 녹화를 중지했습니다."}
 
     def get_all_status(self) -> list[dict]:
         """모든 채널의 상태를 반환한다."""
@@ -866,6 +941,8 @@ class Conductor:
                 "viewer_count": task.viewer_count,
                 "thumbnail_url": task.thumbnail_url,
                 "profile_image_url": task.profile_image_url,
+                "tags": getattr(task, "tags", []),
+                "last_error": getattr(task, "last_error", None),
             }
             pipe = task.pipeline
             if pipe is not None:
@@ -873,13 +950,14 @@ class Conductor:
 
             if task.spaces_process is not None:
                 status["recording"] = {
+                    "is_recording": True,
                     "state": "recording",
-                    "platform": "twitter_spaces",
+                    "platform": "x_spaces",
                     "space_id": task._current_space_id,
                 }
 
-            # Twitter Spaces m3u8 캡처 정보
-            if task.platform == Platform.TWITTER_SPACES:
+            # X Spaces m3u8 캡처 정보
+            if task.platform == Platform.X_SPACES:
                 status["captured_m3u8_url"] = task.captured_m3u8_url
                 status["captured_m3u8_at"] = task.captured_m3u8_at
 

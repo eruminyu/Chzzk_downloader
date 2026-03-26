@@ -199,3 +199,13 @@ code,
 .animate-slide-in-sidebar {
   animation: slide-in-left 0.2s ease-out;
 }
+
+/* Pulse border for recording channels */
+@keyframes pulse-border {
+  0%, 100% { box-shadow: 0 0 0 0 var(--primary-ring); }
+  50%       { box-shadow: 0 0 0 4px transparent; }
+}
+
+.animate-pulse-border {
+  animation: pulse-border 2s ease-in-out infinite;
+}

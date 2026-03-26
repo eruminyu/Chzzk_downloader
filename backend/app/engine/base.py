@@ -15,7 +15,7 @@ class Platform(str, Enum):
 
     CHZZK = "chzzk"
     TWITCASTING = "twitcasting"
-    TWITTER_SPACES = "twitter_spaces"
+    X_SPACES = "x_spaces"
 
 
 class LiveStatus(TypedDict, total=False):
@@ -29,9 +29,9 @@ class LiveStatus(TypedDict, total=False):
     viewer_count: int
     thumbnail_url: str
     profile_image_url: str
-    # Twitter Spaces 전용: 녹화에 필요한 space_id
+    # X Spaces 전용: 녹화에 필요한 space_id
     space_id: Optional[str]
-    # Twitter Spaces 전용: 라이브 중 캡처한 m3u8 URL
+    # X Spaces 전용: 라이브 중 캡처한 m3u8 URL
     m3u8_url: Optional[str]
 
 
@@ -39,7 +39,7 @@ class LiveStatus(TypedDict, total=False):
 class PlatformEngine(Protocol):
     """플랫폼 엔진 프로토콜.
 
-    StreamLinkEngine, TwitcastingEngine, TwitterSpacesEngine이 이를 구현한다.
+    StreamLinkEngine, TwitcastingEngine, XSpacesEngine이 이를 구현한다.
     @runtime_checkable 덕분에 isinstance() 체크 가능.
     """
 
@@ -48,5 +48,5 @@ class PlatformEngine(Protocol):
         ...
 
     def get_stream(self, channel_id: str, quality: str = "best") -> object:
-        """스트림 객체를 반환한다 (Twitter Spaces는 NotImplementedError)."""
+        """스트림 객체를 반환한다 (X Spaces는 NotImplementedError)."""
         ...

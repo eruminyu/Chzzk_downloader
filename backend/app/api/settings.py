@@ -109,9 +109,9 @@ async def get_current_settings():
         # TwitCasting 인증 (설정 여부만 — 실제 값은 노출 안 함)
         "twitcasting_client_id": "***" if settings.twitcasting_client_id else None,
         "twitcasting_client_secret": None,
-        # Twitter Spaces 인증 (설정 여부만)
-        "twitter_bearer_token": "***" if settings.twitter_bearer_token else None,
-        "twitter_cookie_file": settings.twitter_cookie_file,
+        # X Spaces 인증 (설정 여부만)
+        "x_bearer_token": "***" if settings.x_bearer_token else None,
+        "x_cookie_file": settings.x_cookie_file,
     }
 
 
@@ -465,9 +465,9 @@ async def get_auth_status():
     return service.get_auth_status()
 
 
-@router.get("/cookie-status", summary="Twitter 쿠키 유효성 상태 조회")
+@router.get("/cookie-status", summary="X 쿠키 유효성 상태 조회")
 async def get_cookie_status():
-    """Twitter Spaces 쿠키의 유효성 상태를 반환합니다.
+    """X Spaces 쿠키의 유효성 상태를 반환합니다.
 
     쿠키는 하루 1회 자동 검증되며, 이 엔드포인트는 가장 최근 검증 결과를 반환합니다.
     프론트엔드 Settings 페이지 만료 배너에 사용됩니다.
@@ -476,15 +476,15 @@ async def get_cookie_status():
 
     service = get_recorder_service()
     conductor = service._conductor
-    return {"twitter": conductor.get_cookie_status()}
+    return {"x": conductor.get_cookie_status()}
 
 
-@router.post("/cookie-status/check", summary="Twitter 쿠키 즉시 검증")
+@router.post("/cookie-status/check", summary="X 쿠키 즉시 검증")
 async def check_cookie_now():
-    """Twitter Spaces 쿠키를 즉시 검증합니다 (24시간 주기 무시)."""
+    """X Spaces 쿠키를 즉시 검증합니다 (24시간 주기 무시)."""
     from app.main import get_recorder_service
 
     service = get_recorder_service()
     conductor = service._conductor
-    await conductor._check_twitter_cookie()
-    return {"twitter": conductor.get_cookie_status()}
+    await conductor._check_x_cookie()
+    return {"x": conductor.get_cookie_status()}

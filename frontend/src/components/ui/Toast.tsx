@@ -4,7 +4,15 @@ import { clsx } from "clsx";
 
 // ── Types ────────────────────────────────────────────
 
-type ToastType = "success" | "error" | "warning";
+export type ToastType = "success" | "error" | "warning";
+
+export interface ToastHistoryItem {
+    id: string;
+    type: ToastType;
+    message: string;
+    timestamp: Date;
+    read: boolean;
+}
 
 interface Toast {
     id: string;
@@ -12,11 +20,14 @@ interface Toast {
     message: string;
 }
 
-interface ToastContextValue {
+export interface ToastContextValue {
     toast: (type: ToastType, message: string) => void;
     success: (message: string) => void;
     error: (message: string) => void;
     warning: (message: string) => void;
+    history: ToastHistoryItem[];
+    markAllRead: () => void;
+    clearHistory: () => void;
 }
 
 // ── Context ──────────────────────────────────────────
@@ -33,6 +44,7 @@ export function useToast(): ToastContextValue {
 
 export function ToastProvider({ children }: { children: React.ReactNode }) {
     const [toasts, setToasts] = useState<Toast[]>([]);
+    const [history, setHistory] = useState<ToastHistoryItem[]>([]);
     const counterRef = useRef(0);
 
     const removeToast = useCallback((id: string) => {
@@ -43,16 +55,33 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
         (type: ToastType, message: string) => {
             const id = `toast-${++counterRef.current}`;
             setToasts((prev) => [...prev, { id, type, message }]);
+            
+            setHistory((prev) => {
+                const newHistory = [{ id, type, message, timestamp: new Date(), read: false }, ...prev];
+                return newHistory.slice(0, 50);
+            });
+
             setTimeout(() => removeToast(id), 4000);
         },
         [removeToast],
     );
+
+    const markAllRead = useCallback(() => {
+        setHistory((prev) => prev.map((item) => ({ ...item, read: true })));
+    }, []);
+
+    const clearHistory = useCallback(() => {
+        setHistory([]);
+    }, []);
 
     const value: ToastContextValue = {
         toast: addToast,
         success: useCallback((m: string) => addToast("success", m), [addToast]),
         error: useCallback((m: string) => addToast("error", m), [addToast]),
         warning: useCallback((m: string) => addToast("warning", m), [addToast]),
+        history,
+        markAllRead,
+        clearHistory,
     };
 
     return (

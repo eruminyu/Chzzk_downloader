@@ -11,12 +11,12 @@ export const client = axios.create({
 
 // ── Types ───────────────────────────────────────────────
 
-export type Platform = "chzzk" | "twitcasting" | "twitter_spaces";
+export type Platform = "chzzk" | "twitcasting" | "x_spaces";
 
 export const PLATFORM_LABELS: Record<Platform, string> = {
     chzzk: "치지직",
     twitcasting: "TwitCasting",
-    twitter_spaces: "Twitter Spaces",
+    x_spaces: "X Spaces",
 };
 
 export interface Channel {
@@ -47,6 +47,8 @@ export interface Channel {
         message_count: number;
         output_path: string;
     };
+    tags?: string[];
+    last_error?: string;
 }
 
 export interface VodInfo {
@@ -119,15 +121,15 @@ export interface Settings {
     twitcasting_client_id?: string;
     twitcasting_client_secret?: string;
 
-    // Twitter Spaces 인증
-    twitter_bearer_token?: string;
-    twitter_cookie_file?: string;
+    // X Spaces 인증
+    x_bearer_token?: string;
+    x_cookie_file?: string;
 }
 
 export interface PlatformStatus {
     chzzk: { enabled: boolean; authenticated: boolean };
     twitcasting: { enabled: boolean; authenticated: boolean };
-    twitter_spaces: { enabled: boolean; authenticated: boolean; cookie_file_set: boolean };
+    x_spaces: { enabled: boolean; authenticated: boolean; cookie_file_set: boolean };
 }
 
 export interface TwitcastingSettingsUpdate {
@@ -135,9 +137,8 @@ export interface TwitcastingSettingsUpdate {
     client_secret: string;
 }
 
-export interface TwitterSettingsUpdate {
+export interface XSettingsUpdate {
     bearer_token: string;
-    cookie_file?: string;
 }
 
 export interface GeneralSettingsUpdate {
@@ -279,6 +280,10 @@ export const api = {
         const res = await client.post(`/stream/record/${channel_id}/stop`);
         return res.data;
     },
+    stopAllRecordings: async () => {
+        const res = await client.post<{ stopped_count: number; message: string }>("/stream/record/stop-all");
+        return res.data;
+    },
 
     // Monitor
     startMonitor: async () => {
@@ -401,14 +406,44 @@ export const api = {
         const res = await client.put("/platforms/settings/twitcasting", data);
         return res.data;
     },
-    updateTwitterSettings: async (data: TwitterSettingsUpdate) => {
-        const res = await client.put("/platforms/settings/twitter", data);
+    updateXSettings: async (data: XSettingsUpdate) => {
+        const res = await client.put("/platforms/settings/x", data);
+        return res.data;
+    },
+    uploadXCookie: async (file: File) => {
+        const form = new FormData();
+        form.append("file", file);
+        const res = await client.post("/platforms/x/cookie", form, {
+            headers: { "Content-Type": "multipart/form-data" },
+        });
+        return res.data;
+    },
+    deleteXCookie: async () => {
+        const res = await client.delete("/platforms/x/cookie");
         return res.data;
     },
 
     // Stats
     getStats: async (): Promise<StatsResponse> => {
         const res = await client.get<StatsResponse>("/stats/");
+        return res.data;
+    },
+
+    // Tags
+    getTags: async () => {
+        const res = await client.get<{ tags: string[] }>("/tags");
+        return res.data;
+    },
+    createTag: async (name: string) => {
+        const res = await client.post<{ tags: string[] }>("/tags", { name });
+        return res.data;
+    },
+    deleteTag: async (name: string) => {
+        const res = await client.delete<{ status: string; deleted: string }>(`/tags/${encodeURIComponent(name)}`);
+        return res.data;
+    },
+    updateChannelTags: async (channel_id: string, tags: string[]) => {
+        const res = await client.patch<{ status: string; tags: string[] }>(`/tags/channel/${encodeURIComponent(channel_id)}`, { tags });
         return res.data;
     },
 
