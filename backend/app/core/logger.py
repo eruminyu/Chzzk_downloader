@@ -10,6 +10,33 @@ import sys
 from pathlib import Path
 
 
+class _StderrToLogger:
+    """sys.stderr를 로거로 리다이렉트하는 래퍼.
+
+    FFmpeg subprocess 에러, uvicorn 내부 오류 등 stderr로 가는 모든 출력을
+    로거를 통해 타임스탬프와 함께 기록한다.
+    """
+
+    def __init__(self, logger: logging.Logger) -> None:
+        self._logger = logger
+        self._buf = ""
+
+    def write(self, msg: str) -> None:
+        self._buf += msg
+        while "\n" in self._buf:
+            line, self._buf = self._buf.split("\n", 1)
+            if line.strip():
+                self._logger.error(line)
+
+    def flush(self) -> None:
+        if self._buf.strip():
+            self._logger.error(self._buf)
+            self._buf = ""
+
+    def fileno(self) -> int:  # subprocess 호환성
+        return sys.__stderr__.fileno()
+
+
 def setup_logger(
     name: str = "chzzk",
     *,
@@ -64,6 +91,8 @@ def _get_default_logger():
         level = logging.DEBUG if settings.debug else logging.INFO
     except Exception:
         level = logging.INFO
-    return setup_logger(level=level, log_dir="logs")
+    _logger = setup_logger(level=level, log_dir="logs")
+    sys.stderr = _StderrToLogger(_logger)  # type: ignore[assignment]
+    return _logger
 
 logger = _get_default_logger()
