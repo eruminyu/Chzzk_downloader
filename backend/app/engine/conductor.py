@@ -85,12 +85,14 @@ class Conductor:
         self._x_spaces_engine: Optional[XSpacesEngine] = None
         self._channels: dict[str, ChannelTask] = {}
         self._running = False
-        self._persistence_path = Path(settings.download_dir) / "channels.json"
+        _data_dir = Path(__file__).resolve().parents[2] / "data"
+        _data_dir.mkdir(parents=True, exist_ok=True)
+        self._persistence_path = _data_dir / "channels.json"
         self._discord_bot = discord_bot
         self._event_queues: list[asyncio.Queue] = []
         # 라이브 감지 이력: composite_key → 날짜 문자열 set (하루 1회 카운트)
         self._live_detections: dict[str, set[str]] = {}
-        self._live_history_path = Path(settings.download_dir) / "live_history.json"
+        self._live_history_path = _data_dir / "live_history.json"
         # X 쿠키 유효성 상태
         self._cookie_status: dict = {"valid": True, "checked_at": None, "reason": None}
         self._last_cookie_check: Optional[datetime] = None
@@ -636,6 +638,7 @@ class Conductor:
                                 composite_key,
                                 channel_name=task.channel_name,
                                 title=task.title,
+                                is_retry=True,
                             )
                         elif retry_count == max_retries:
                             retry_count += 1
@@ -714,6 +717,7 @@ class Conductor:
         composite_key: str,
         channel_name: Optional[str] = None,
         title: Optional[str] = None,
+        is_retry: bool = False,
     ) -> None:
         """채널의 녹화를 시작한다."""
         task = self._channels.get(composite_key)
@@ -740,8 +744,8 @@ class Conductor:
             )
             logger.info(f"[{composite_key}] 자동 라이브 녹화 시작 (quality={quality}).")
 
-            # ── Discord 알림: 녹화 시작 ──
-            if self._discord_bot:
+            # ── Discord 알림: 녹화 시작 (재시도 시엔 생략) ──
+            if self._discord_bot and not is_retry:
                 try:
                     await self._discord_bot.send_notification(
                         title="🔴 녹화 시작",
