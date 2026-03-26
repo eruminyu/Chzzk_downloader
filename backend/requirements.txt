@@ -3,6 +3,7 @@ uvicorn[standard]
 python-multipart
 httpx
 aiofiles
+streamlink
 yt-dlp
 ffmpeg-python
 python-dotenv
