@@ -770,6 +770,8 @@ class Conductor:
                 title=title or task.title,
             )
             logger.info(f"[{composite_key}] 자동 라이브 녹화 시작 (quality={quality}).")
+
+
             # ── Discord 알림: 녹화 시작 (재시도 시엔 생략) ──
             if self._discord_bot and not is_retry:
                 try:
