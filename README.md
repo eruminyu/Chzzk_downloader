@@ -231,8 +231,9 @@ Twitter Spaces 캡처를 위해 트위터 계정 쿠키가 필요합니다.
 설정(`.env`)과 녹화 파일은 그대로 유지됩니다.
 
 ### 🐧 Linux Native
+설치 스크립트가 기존 설치를 감지하면 자동으로 업데이트 모드로 동작합니다.
 ```bash
-curl -fsSL https://raw.githubusercontent.com/eruminyu/Chzzk_downloader/main/scripts/update.sh | bash
+curl -fsSL https://raw.githubusercontent.com/eruminyu/Chzzk_downloader/main/scripts/install.sh | bash
 ```
 
 ### 🐳 Docker
