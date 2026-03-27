@@ -136,6 +136,7 @@ class VodEngine:
         opts: dict[str, Any] = {
             "format": task.quality,
             "outtmpl": str(Path(task.output_dir) / "[%(uploader,channel)s] %(title)s.%(ext)s"),
+            "merge_output_format": settings.vod_format,
             "ffmpeg_location": ffmpeg_dir,
             "no_warnings": True,
             "quiet": True,
@@ -317,19 +318,13 @@ class VodEngine:
             task.started_at = datetime.now()
             logger.info(f"[{task_id}] 다운로드 시작: {task.url}")
 
-            # URL 타입 감지
-            is_chzzk = self._is_chzzk_url(task.url)
-            is_clip = "/clips/" in task.url
+            # URL 타입 감지 + 클립 URL을 비디오 URL로 변환
+            if self._is_chzzk_url(task.url) and "/clips/" in task.url:
+                task.url = await self._resolve_clip_url(task_id, task.url)
 
             try:
-                if is_chzzk and is_clip:
-                    # 치지직 클립 (Streamlink + FFmpeg, 짧은 영상)
-                    await self._download_clip(task_id, task)
-                else:
-                    # 치지직 VOD 및 모든 외부 URL → yt-dlp
-                    # ── 근본 수정: Streamlink DASHStream.read()가 EOF를 반환하지 않아
-                    # VOD 다운로드가 99%에서 멈추는 버그. yt-dlp는 EOF를 정확히 알고 있음.
-                    await self._download_external(task_id, task)
+                # 모든 URL → yt-dlp (Chzzk VOD/클립/외부)
+                await self._download_external(task_id, task)
 
             except DownloadCancelledError:
                 task.state = VodDownloadState.IDLE
@@ -389,278 +384,41 @@ class VodEngine:
                         # 에러 발생 시 이력 저장
                         self._save_history()
 
-    async def _download_vod(self, task_id: str, task: VodDownloadTask) -> None:
-        """Streamlink + FFmpeg를 사용한 VOD 다운로드 (중단 시에도 재생 가능).
+    async def _resolve_clip_url(self, task_id: str, clip_url: str) -> str:
+        """치지직 클립 URL을 비디오 URL로 변환한다.
 
-        치지직 VOD URL → Streamlink으로 스트림 추출 → FFmpeg 파이프라인으로 저장.
-        라이브 녹화와 동일한 방식으로, 중단되어도 바로 재생 가능하다.
+        Chzzk 클립 API에서 videoId를 조회한 뒤
+        https://chzzk.naver.com/video/{videoId} 형식으로 반환한다.
+        videoId를 가져올 수 없으면 원본 URL을 그대로 반환한다.
         """
-        from app.engine.pipeline import FFmpegPipeline
+        import re
 
-        settings = get_settings()
+        match = re.search(r"/clips/([^/?#]+)", clip_url)
+        if not match:
+            return clip_url
 
-        # 1. Streamlink으로 VOD 스트림 및 메타데이터 가져오기
-        def _get_streams() -> dict[str, Any]:
-            import streamlink
-            from streamlink.plugins.chzzk import Chzzk
+        clip_id = match.group(1)
+        api_url = f"https://api.chzzk.naver.com/service/v1/play-info/clip/{clip_id}"
+        headers = self._auth.get_http_headers()
 
-            session = streamlink.Streamlink()
-            sl_options = self._auth.get_streamlink_options()
-            for key, value in sl_options.items():
-                session.set_option(key, value)
+        try:
+            import httpx
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(api_url, headers=headers, timeout=10.0)
+                resp.raise_for_status()
+                data = resp.json()
 
-            plugin = Chzzk(session, task.url)
-            streams = plugin.streams()
-            if not streams:
-                raise RuntimeError("VOD 스트림을 찾을 수 없습니다.")
+            content = data.get("content") or {}
+            video_id = content.get("videoId") or content.get("videoNo")
+            if video_id:
+                video_url = f"https://chzzk.naver.com/video/{video_id}"
+                logger.info(f"[{task_id}] 클립 URL 변환: {clip_url} → {video_url}")
+                return video_url
 
-            vod_title = getattr(plugin, 'title', None) or "Unknown VOD"
-            channel_name = getattr(plugin, 'author', None) or "Unknown Channel"
+        except Exception as e:
+            logger.warning(f"[{task_id}] 클립 API 조회 실패, 원본 URL 사용: {e}")
 
-            logger.info(f"[{task_id}] VOD 제목: {vod_title}, 채널: {channel_name}")
-
-            return {
-                "streams": streams,
-                "vod_title": vod_title,
-                "channel_name": channel_name,
-            }
-
-        stream_data: dict[str, Any] = await asyncio.to_thread(_get_streams)
-        streams = stream_data["streams"]
-
-        # UI 표시용 제목 설정
-        task.title = f'[{stream_data["channel_name"]}] {stream_data["vod_title"]}'
-        logger.info(f"[{task_id}] VOD 메타데이터: {task.title}")
-
-        # 화질 선택
-        stream = streams.get(task.quality) or streams.get("best")
-        if not stream:
-            raise RuntimeError(f"화질 '{task.quality}'를 찾을 수 없습니다.")
-
-        # 파일명 생성: [채널명] 제목.{ext}
-        ext = settings.output_format or "mp4"
-        channel_name_clean = self._clean_filename(stream_data["channel_name"])
-        vod_title_clean = self._clean_filename(stream_data["vod_title"])
-        filename = f"[{channel_name_clean}] {vod_title_clean}.{ext}"
-        output_file = Path(task.output_dir) / filename
-        task.output_path = str(output_file)
-
-        logger.info(f"[{task_id}] VOD 다운로드: {task.url} -> {output_file}")
-
-        # 2. FFmpeg 파이프라인으로 다운로드
-        pipeline = FFmpegPipeline(channel_id=task_id)
-        await pipeline.start_recording(
-            stream_obj=stream,
-            output_dir=task.output_dir,
-            filename=filename,
-        )
-
-        # 3. 진행률 모니터링 (파일 크기 기반 + 정체 감지)
-        last_size = 0
-        stall_count = 0
-        STALL_THRESHOLD = 15  # 15회 × 2초 = 30초 동안 파일 크기 변화 없으면 완료로 간주
-
-        while pipeline.state.value == "recording":
-            if task.cancel_flag:
-                await pipeline.stop_recording()
-                raise DownloadCancelledError("사용자에 의해 취소되었습니다.")
-
-            # 일시정지 체크
-            task.pause_event.wait()
-
-            # 파일 크기 기반 진행률 추정
-            if output_file.exists():
-                downloaded = output_file.stat().st_size
-                task.downloaded_bytes = downloaded
-                task.download_speed = 0.0
-                # 크기 정보가 없으므로 대략적으로 표시
-                task.progress = min((downloaded / (500 * 1024 * 1024)) * 100, 99.0)
-
-                # ── VOD 정체(Stall) 감지 ──
-                # Streamlink DASHStream이 모든 데이터 전송 후 EOF를 보내지 않아
-                # FFmpeg가 종료되지 않는 문제를 우회한다.
-                if downloaded > 0 and downloaded == last_size:
-                    stall_count += 1
-                    if stall_count >= STALL_THRESHOLD:
-                        logger.info(
-                            f"[{task_id}] VOD 스트림 데이터 수신 완료 감지 "
-                            f"(파일 크기 {downloaded / (1024*1024):.1f}MB, {stall_count * 2}초 정체). "
-                            f"파이프라인을 종료합니다."
-                        )
-                        await pipeline.stop_recording()
-                        break
-                else:
-                    stall_count = 0
-                    last_size = downloaded
-
-            await asyncio.sleep(2)
-
-        # 4. 완료 확인 (stall 감지로 stop_recording된 경우도 파일이 있으면 완료 처리)
-        if output_file.exists() and pipeline.state.value in ("completed", "stopping"):
-            task.state = VodDownloadState.COMPLETED
-            task.completed_at = datetime.now()
-            task.output_path = str(output_file)
-            task.progress = 100.0
-            logger.info(f"[{task_id}] VOD 다운로드 완료: {output_file}")
-            self._save_history()
-
-            # ── Discord 알림: VOD 다운로드 완료 ──
-            if self._discord_bot:
-                try:
-                    file_size = output_file.stat().st_size / (1024 * 1024)
-                except (FileNotFoundError, OSError):
-                    file_size = 0.0
-                duration = (task.completed_at - task.started_at).total_seconds() if task.started_at and task.completed_at else 0
-
-                try:
-                    await self._discord_bot.send_notification(
-                        title="📥 VOD 다운로드 완료",
-                        description=f"제목: **{task.title}**",
-                        color="green",
-                        fields={
-                            "화질": task.quality,
-                            "파일 크기": f"{file_size:.1f} MB",
-                            "다운로드 시간": f"{duration // 60:.0f}분 {duration % 60:.0f}초" if duration > 0 else "N/A",
-                            "저장 경로": str(output_file),
-                        },
-                    )
-                except Exception as e:
-                    logger.error(f"[{task_id}] Discord VOD 완료 알림 전송 실패: {e}")
-        else:
-            raise RuntimeError(f"FFmpeg 파이프라인 오류: {pipeline.state.value}")
-
-    async def _download_clip(self, task_id: str, task: VodDownloadTask) -> None:
-        """Streamlink + FFmpeg를 사용한 클립 다운로드."""
-        from app.engine.pipeline import FFmpegPipeline
-
-        settings = get_settings()
-
-        # Streamlink로 클립 스트림 및 메타데이터 가져오기
-        def _get_streams() -> dict[str, Any]:
-            import streamlink
-            from streamlink.plugins.chzzk import Chzzk
-
-            session = streamlink.Streamlink()
-            sl_options = self._auth.get_streamlink_options()
-            for key, value in sl_options.items():
-                session.set_option(key, value)
-
-            # Chzzk 플러그인 인스턴스 직접 생성
-            plugin = Chzzk(session, task.url)
-
-            # ── Streamlink 8.2.0 chzzk 플러그인 버그 패치 ──
-            # _get_vod_playback()에서 metadata를 4개 언패킹하지만
-            # get_clips()는 3개만 반환하여 ValueError 발생.
-            # metadata가 부족하면 None으로 패딩하여 우회한다.
-            _original_get_vod_playback = plugin._get_vod_playback
-
-            def _patched_get_vod_playback(datatype, data):
-                if datatype == "error":
-                    return _original_get_vod_playback(datatype, data)
-                # data 튜플에서 앞 4개(adult, in_key, vod_id, playback)를 제외한 나머지가 metadata
-                if isinstance(data, tuple) and len(data) >= 4:
-                    metadata_len = len(data) - 4
-                    if metadata_len < 4:
-                        # metadata를 4개로 패딩 (id, author, title, category)
-                        data = data + (None,) * (4 - metadata_len)
-                return _original_get_vod_playback(datatype, data)
-
-            plugin._get_vod_playback = _patched_get_vod_playback
-
-            # 플러그인의 streams() 메서드를 직접 호출
-            streams = plugin.streams()
-            if not streams:
-                raise RuntimeError("클립 스트림을 찾을 수 없습니다.")
-
-            # 플러그인에서 메타데이터 가져오기 (streams() 호출 후 설정됨)
-            clip_title = getattr(plugin, 'title', None) or "Unknown Clip"
-            channel_name = getattr(plugin, 'author', None) or "Unknown Channel"
-
-            logger.info(f"[{task_id}] 클립 제목: {clip_title}, 채널: {channel_name}")
-
-            return {
-                "streams": streams,
-                "clip_title": clip_title,
-                "channel_name": channel_name
-            }
-
-        stream_data: dict[str, Any] = await asyncio.to_thread(_get_streams)
-        streams = stream_data["streams"]
-
-        # UI 표시용 제목 설정 (채널명 + 클립제목)
-        task.title = f'[{stream_data["channel_name"]}] {stream_data["clip_title"]}'
-        logger.info(f"[{task_id}] 클립 메타데이터: {task.title}")
-
-        # 화질 선택
-        stream = streams.get(task.quality) or streams.get("best")
-        if not stream:
-            raise RuntimeError(f"화질 '{task.quality}'를 찾을 수 없습니다.")
-
-        # FFmpeg로 다운로드
-        # 파일명 생성: [채널명].{ext}
-        ext = settings.output_format or "mp4"
-        channel_name_clean = self._clean_filename(stream_data["channel_name"])
-        filename = f"[{channel_name_clean}].{ext}"
-        output_file = Path(task.output_dir) / filename
-        task.expected_part_file = str(output_file) + ".part"
-
-        logger.info(f"[{task_id}] 클립 다운로드: {task.url} -> {output_file}")
-
-        # FFmpeg 파이프라인 생성 및 시작
-        pipeline = FFmpegPipeline(channel_id=task_id)
-        await pipeline.start_recording(
-            stream_obj=stream,
-            output_dir=task.output_dir,
-            filename=filename,
-        )
-
-        # 진행률 모니터링 (파일 크기 기반 + 정체 감지)
-        last_size = 0
-        stall_count = 0
-        STALL_THRESHOLD = 10  # 10회 × 2초 = 20초 (클립은 짧으므로 더 짧은 감지)
-
-        while pipeline.state.value == "recording":
-            if task.cancel_flag:
-                await pipeline.stop_recording()
-                raise DownloadCancelledError("사용자에 의해 취소되었습니다.")
-
-            # 일시정지 체크
-            task.pause_event.wait()
-
-            # 파일 크기 기반 진행률 추정 (완전한 추정이 불가능하므로 대략적으로)
-            if output_file.exists():
-                current_size = output_file.stat().st_size
-                file_size_mb = current_size / (1024 * 1024)
-                # 임의로 100MB를 100%로 가정 (클립은 보통 짧음)
-                task.progress = min((file_size_mb / 100) * 100, 99.0)
-
-                # ── 클립 정체(Stall) 감지 ──
-                if current_size > 0 and current_size == last_size:
-                    stall_count += 1
-                    if stall_count >= STALL_THRESHOLD:
-                        logger.info(
-                            f"[{task_id}] 클립 데이터 수신 완료 감지 "
-                            f"(파일 크기 {file_size_mb:.1f}MB). 파이프라인을 종료합니다."
-                        )
-                        await pipeline.stop_recording()
-                        break
-                else:
-                    stall_count = 0
-                    last_size = current_size
-
-            await asyncio.sleep(2)
-
-        # 완료 확인 (stall 감지로 stop_recording된 경우도 파일이 있으면 완료 처리)
-        if output_file.exists() and pipeline.state.value in ("completed", "stopping"):
-            task.state = VodDownloadState.COMPLETED
-            task.completed_at = datetime.now()
-            task.output_path = str(output_file)
-            task.progress = 100.0
-            logger.info(f"[{task_id}] 클립 다운로드 완료: {output_file}")
-            # 완료 시 이력 저장
-            self._save_history()
-        else:
-            raise RuntimeError(f"FFmpeg 파이프라인 오류: {pipeline.state.value}")
+        return clip_url
 
     async def _download_external(self, task_id: str, task: VodDownloadTask) -> None:
         """yt-dlp를 사용한 외부 URL(유튜브 등) 다운로드."""

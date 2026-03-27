@@ -42,7 +42,7 @@ class GeneralSettingsUpdateRequest(BaseModel):
 
     download_dir: Optional[str] = Field(None, description="녹화 저장 경로")
     monitor_interval: Optional[int] = Field(None, ge=5, le=300, description="감시 주기 (초)")
-    output_format: Optional[str] = Field(None, description="녹화 출력 포맷 (ts, mp4, mkv)")
+    live_format: Optional[str] = Field(None, description="라이브 녹화 포맷 (ts, mkv, mp4)")
     recording_quality: Optional[str] = Field(None, description="녹화 품질 (best, 1080p, 720p, 480p)")
     split_download_dirs: Optional[bool] = Field(None, description="분할 저장 경로 사용 여부")
     vod_chzzk_dir: Optional[str] = Field(None, description="치지직 VOD/클립 저장 경로 (빈 문자열=기본 경로 사용)")
@@ -55,6 +55,7 @@ class VodSettingsUpdateRequest(BaseModel):
     vod_max_concurrent: Optional[int] = Field(None, ge=1, le=10, description="동시 다운로드 최대 개수")
     vod_default_quality: Optional[str] = Field(None, description="기본 화질 (best, 1080p, 720p, 480p)")
     vod_max_speed: Optional[int] = Field(None, ge=0, le=1000, description="최대 다운로드 속도 (MB/s, 0=무제한)")
+    vod_format: Optional[str] = Field(None, description="VOD 다운로드 포맷 (mp4, mkv, ts)")
 
 
 class ChatSettingsUpdateRequest(BaseModel):
@@ -92,7 +93,8 @@ async def get_current_settings():
         "discord_bot_configured": bool(settings.discord_bot_token),
         "keep_download_parts": settings.keep_download_parts,
         "max_record_retries": settings.max_record_retries,
-        "output_format": settings.output_format,
+        "live_format": settings.live_format,
+        "vod_format": settings.vod_format,
         "recording_quality": settings.recording_quality,
         # VOD 설정
         "vod_max_concurrent": settings.vod_max_concurrent,
@@ -163,16 +165,16 @@ async def update_general_settings(req: GeneralSettingsUpdateRequest):
         settings.monitor_interval = req.monitor_interval
         env_updates["MONITOR_INTERVAL"] = str(req.monitor_interval)
 
-    # ── output_format ──
-    if req.output_format is not None:
-        fmt = req.output_format.lower()
+    # ── live_format ──
+    if req.live_format is not None:
+        fmt = req.live_format.lower()
         if fmt not in VALID_FORMATS:
             raise HTTPException(
                 status_code=400,
                 detail=f"지원하지 않는 포맷입니다. 사용 가능: {', '.join(VALID_FORMATS)}",
             )
-        settings.output_format = fmt
-        env_updates["OUTPUT_FORMAT"] = fmt
+        settings.live_format = fmt
+        env_updates["LIVE_FORMAT"] = fmt
 
     # ── recording_quality ──
     if req.recording_quality is not None:
@@ -228,7 +230,7 @@ async def update_general_settings(req: GeneralSettingsUpdateRequest):
         "settings": {
             "download_dir": settings.download_dir,
             "monitor_interval": settings.monitor_interval,
-            "output_format": settings.output_format,
+            "live_format": settings.live_format,
             "recording_quality": settings.recording_quality,
             "split_download_dirs": settings.split_download_dirs,
             "vod_chzzk_dir": settings.vod_chzzk_dir,
@@ -324,6 +326,17 @@ async def update_vod_settings(req: VodSettingsUpdateRequest):
         settings.vod_max_speed = req.vod_max_speed
         env_updates["VOD_MAX_SPEED"] = str(req.vod_max_speed)
 
+    # ── vod_format ──
+    if req.vod_format is not None:
+        fmt = req.vod_format.lower()
+        if fmt not in VALID_FORMATS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"지원하지 않는 포맷입니다. 사용 가능: {', '.join(VALID_FORMATS)}",
+            )
+        settings.vod_format = fmt
+        env_updates["VOD_FORMAT"] = fmt
+
     # .env 영구 저장
     if env_updates:
         try:
@@ -339,6 +352,7 @@ async def update_vod_settings(req: VodSettingsUpdateRequest):
             "vod_max_concurrent": settings.vod_max_concurrent,
             "vod_default_quality": settings.vod_default_quality,
             "vod_max_speed": settings.vod_max_speed,
+            "vod_format": settings.vod_format,
         },
     }
 

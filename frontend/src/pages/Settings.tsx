@@ -162,7 +162,8 @@ export default function Settings() {
     // ── General state ──
     const [downloadDir, setDownloadDir] = useState("");
     const [monitorInterval, setMonitorInterval] = useState(30);
-    const [outputFormat, setOutputFormat] = useState("ts");
+    const [liveFormat, setLiveFormat] = useState("ts");
+    const [vodFormat, setVodFormat] = useState("mp4");
     const [recordingQuality, setRecordingQuality] = useState("best");
     const [splitDownloadDirs, setSplitDownloadDirs] = useState(false);
     const [vodChzzkDir, setVodChzzkDir] = useState("");
@@ -196,7 +197,7 @@ export default function Settings() {
             case "general":
                 return downloadDir !== settings.download_dir ||
                        monitorInterval !== settings.monitor_interval ||
-                       outputFormat !== (settings.output_format || "ts") ||
+                       liveFormat !== (settings.live_format || "ts") ||
                        recordingQuality !== (settings.recording_quality || "best") ||
                        splitDownloadDirs !== (settings.split_download_dirs ?? false) ||
                        vodChzzkDir !== (settings.vod_chzzk_dir ?? "") ||
@@ -206,7 +207,8 @@ export default function Settings() {
                        maxRetries !== settings.max_record_retries ||
                        vodMaxConcurrent !== settings.vod_max_concurrent ||
                        vodDefaultQuality !== settings.vod_default_quality ||
-                       vodMaxSpeed !== settings.vod_max_speed;
+                       vodMaxSpeed !== settings.vod_max_speed ||
+                       vodFormat !== (settings.vod_format || "mp4");
             case "auth":
                 return (twitcastingClientId !== "" || twitcastingClientSecret !== "") ||
                        xBearerToken !== "" ||
@@ -287,7 +289,8 @@ export default function Settings() {
             setMaxRetries(data.max_record_retries);
             setDownloadDir(data.download_dir);
             setMonitorInterval(data.monitor_interval);
-            setOutputFormat(data.output_format || "ts");
+            setLiveFormat(data.live_format || "ts");
+            setVodFormat(data.vod_format || "mp4");
             setRecordingQuality(data.recording_quality || "best");
             setVodMaxConcurrent(data.vod_max_concurrent);
             setVodDefaultQuality(data.vod_default_quality);
@@ -424,7 +427,7 @@ export default function Settings() {
             await api.updateGeneralSettings({
                 download_dir: downloadDir,
                 monitor_interval: monitorInterval,
-                output_format: outputFormat,
+                live_format: liveFormat,
                 recording_quality: recordingQuality,
                 split_download_dirs: splitDownloadDirs,
                 vod_chzzk_dir: vodChzzkDir,
@@ -447,6 +450,7 @@ export default function Settings() {
                 vod_max_concurrent: vodMaxConcurrent,
                 vod_default_quality: vodDefaultQuality,
                 vod_max_speed: vodMaxSpeed,
+                vod_format: vodFormat,
             });
             toast.success("VOD 설정이 저장되었습니다.");
             loadSettings();
@@ -642,19 +646,19 @@ export default function Settings() {
                         <div className="space-y-2">
                             <label className="text-sm font-medium text-zinc-300 flex items-center gap-2">
                                 <Film className="w-4 h-4" />
-                                녹화 포맷
+                                라이브 녹화 포맷
                             </label>
                             <Select
-                                value={outputFormat}
-                                onChange={setOutputFormat}
+                                value={liveFormat}
+                                onChange={setLiveFormat}
                                 options={[
-                                    { value: "ts", label: "TS (MPEG Transport Stream)" },
-                                    { value: "mp4", label: "MP4 (권장 — 범용)" },
-                                    { value: "mkv", label: "MKV (Matroska)" },
+                                    { value: "ts", label: "TS — MPEG Transport Stream (권장)" },
+                                    { value: "mkv", label: "MKV — Matroska" },
+                                    { value: "mp4", label: "MP4 (권장하지 않음 — 라이브 중단 시 파일 손상 가능)" },
                                 ]}
                             />
                             <p className="text-xs text-zinc-500">
-                                TS는 중단 시에도 파일이 유지되며, MP4/MKV는 호환성이 좋습니다.
+                                TS/MKV는 스트리밍에 최적화된 컨테이너로 녹화 중단 시에도 파일이 유지됩니다. MP4는 라이브 녹화에 적합하지 않습니다.
                             </p>
                         </div>
 
@@ -674,7 +678,7 @@ export default function Settings() {
                                     { value: "480p", label: "480p" },
                                 ]}
                             />
-                            <p className="text-xs text-zinc-500">Streamlink이 지원하는 화질 중 선택됩니다.</p>
+                            <p className="text-xs text-zinc-500">yt-dlp가 지원하는 화질 중 선택됩니다.</p>
                         </div>
 
                         <button
@@ -747,6 +751,26 @@ export default function Settings() {
                                         max={1000}
                                     />
                                     <p className="text-xs text-zinc-500">0 = 무제한, 네트워크 대역폭 제한 시 사용</p>
+                                </div>
+
+                                {/* VOD 다운로드 포맷 */}
+                                <div className="space-y-2">
+                                    <label className="text-sm font-medium text-zinc-300 flex items-center gap-2">
+                                        <Film className="w-4 h-4" />
+                                        VOD 다운로드 포맷
+                                    </label>
+                                    <Select
+                                        value={vodFormat}
+                                        onChange={setVodFormat}
+                                        options={[
+                                            { value: "mp4", label: "MP4 — MPEG-4 (권장)" },
+                                            { value: "mkv", label: "MKV — Matroska" },
+                                            { value: "ts", label: "TS — MPEG Transport Stream" },
+                                        ]}
+                                    />
+                                    <p className="text-xs text-zinc-500">
+                                        VOD/클립은 MP4가 가장 호환성이 좋습니다. 오디오·비디오 병합이 필요한 경우 ffmpeg를 사용합니다.
+                                    </p>
                                 </div>
                             </div>
 

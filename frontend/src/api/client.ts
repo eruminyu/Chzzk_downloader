@@ -98,7 +98,8 @@ export interface Settings {
     keep_download_parts: boolean;
     max_record_retries: number;
 
-    output_format: string;
+    live_format: string;
+    vod_format: string;
     recording_quality: string;
 
     // VOD 설정
@@ -144,7 +145,7 @@ export interface XSettingsUpdate {
 export interface GeneralSettingsUpdate {
     download_dir?: string;
     monitor_interval?: number;
-    output_format?: string;
+    live_format?: string;
     recording_quality?: string;
     split_download_dirs?: boolean;
     vod_chzzk_dir?: string;
@@ -167,6 +168,7 @@ export interface VodSettingsUpdate {
     vod_max_concurrent?: number;
     vod_default_quality?: string;
     vod_max_speed?: number;
+    vod_format?: string;
 }
 
 export interface ChatSettingsUpdate {

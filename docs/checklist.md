@@ -1,5 +1,45 @@
 # Chzzk-Recorder-Pro 개발 체크리스트
 
+## 2026-03-27: YtdlpLivePipeline 2-Phase 아키텍처 + ffmpeg 8.0 호환성
+
+- [x] `pipeline.py`: yt-dlp subprocess 다운로드 → **yt-dlp URL 추출(`-j`) + ffmpeg 직접 녹화** 2단계로 리팩토링
+  - yt-dlp는 라이브 HLS에 무조건 FFmpegFD 사용 (소스코드 하드코딩, `--downloader native` 무시)
+  - ffmpeg 직접 실행으로 완전한 제어권 확보
+- [x] `pipeline.py`: `_extract_hls_url()` 메서드 추가 (yt-dlp `-j` → JSON에서 HLS URL + HTTP 헤더 추출)
+- [x] `pipeline.py`: `stop_recording()` ffmpeg 방식으로 변경 (stdin에 `q` 전송)
+- [x] `pipeline.py`: ffmpeg 8.0 `extension_picky` 호환성 수정 (`-extension_picky 0`)
+  - ffmpeg 8.0.1 신규 보안 기능: HLS 세그먼트 확장자 검증 (기본 `true`)
+  - Chzzk CDN 세그먼트: `.m4v` 확장자 사용 → MOV 디먹서 허용 목록에 없어 거부됨
+- [x] `pipeline.py`: `-f mpegts` 출력 포맷 명시 (yt-dlp FFmpegFD와 동일)
+- [x] `pipeline.py`: `-headers` 멀티라인 Windows subprocess 파싱 문제 해결 → 헤더 제거 (URL 내 Akamai 토큰으로 충분)
+- [x] 일반 채널 + 연령 제한 채널 녹화 테스트 통과
+- ⚠️ ffmpeg 7.x 이하에서는 `extension_picky` 옵션이 없으므로 경고가 출력될 수 있음 (동작에는 영향 없음)
+
+## 2026-03-26: 라이브 녹화 포맷 / VOD 다운로드 포맷 분리
+
+- [x] `config.py`: `output_format` 제거 → `live_format` (기본: ts) + `vod_format` (기본: mp4) 분리
+- [x] `settings.py` (API): 스키마·GET·PUT /general·PUT /vod 업데이트
+- [x] `pipeline.py`: `settings.output_format` → `settings.live_format` 전체 교체
+- [x] `vod.py` (engine): `_build_ytdlp_options()`에 `merge_output_format: settings.vod_format` 추가
+- [x] `client.ts`: 타입 업데이트 (`output_format` → `live_format` + `vod_format`)
+- [x] `Settings.tsx`: 상태 분리, General 탭 "라이브 녹화 포맷", Download 탭 "VOD 다운로드 포맷" UI 추가
+- [x] `pipeline.py` 추가 수정: `--hls-use-mpegts` 추가, `--no-part` 제거 (ffmpeg code=3199971767 버그 수정)
+- [x] `pipeline.py` 쿠키 방식 변경: `--add-header Cookie:` → Netscape 임시 쿠키 파일 (`--cookies`)
+- ⚠️ 기존 `.env`의 `OUTPUT_FORMAT=` 키는 무시됨 → 서버 재시작 시 기본값 적용
+
+## 2026-03-26: streamlink 완전 제거 + yt-dlp 통합
+
+- [x] `pipeline.py`: `YtdlpLivePipeline` 클래스 추가 (yt-dlp subprocess 기반, FFmpegPipeline과 동일 인터페이스)
+- [x] `downloader.py`: `StreamLinkEngine` → `ChzzkLiveEngine`, `get_stream()` → `get_stream_url()` (URL 문자열 반환)
+- [x] `twitcasting.py`: `get_stream()` 제거 → `get_stream_url()` 추가
+- [x] `auth.py`: `get_streamlink_options()` 제거
+- [x] `vod.py`: `_download_vod()` (dead code) + `_download_clip()` 제거, `_resolve_clip_url()` 추가 (클립 API → videoId → video URL 변환)
+- [x] `conductor.py`: `StreamLinkEngine` → `ChzzkLiveEngine`, `FFmpegPipeline` → `YtdlpLivePipeline` 교체, `_start_recording()` 수정
+- [x] `requirements.txt`: `streamlink` 제거
+- [x] 전체 모듈 import 오류 없음 확인
+- ⚠️ 주의: yt-dlp는 Chzzk 클립 URL(`/clips/...`)을 직접 지원하지 않음 → API 조회로 `/video/{id}` URL 변환 후 다운로드
+- ⚠️ 근본 원인: streamlink 8.2.1 `.m4s` 초기화 세그먼트 토큰 미주입 버그 (`timeMachineActive=True`)
+
 ## 2026-03-25: twitter → X 전체 rename
 
 - [x] `backend/app/engine/twitter_spaces.py` → `x_spaces.py` (파일 이름 변경)

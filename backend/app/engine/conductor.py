@@ -18,8 +18,8 @@ from app.core.logger import logger
 from app.engine.auth import AuthManager
 from app.engine.base import Platform
 from app.engine.chat import ChatArchiver
-from app.engine.downloader import StreamLinkEngine
-from app.engine.pipeline import FFmpegPipeline, RecordingState
+from app.engine.downloader import ChzzkLiveEngine
+from app.engine.pipeline import YtdlpLivePipeline, RecordingState
 
 if TYPE_CHECKING:
     from app.services.discord_bot import DiscordBotService
@@ -34,7 +34,7 @@ class ChannelTask:
     channel_id: str
     platform: Platform = Platform.CHZZK
     auto_record: bool = True
-    pipeline: Optional[FFmpegPipeline] = field(default=None, repr=False)
+    pipeline: Optional[YtdlpLivePipeline] = field(default=None, repr=False)
     chat_archiver: Optional[ChatArchiver] = field(default=None, repr=False)
     monitor_task: Optional[asyncio.Task] = field(default=None, repr=False)
     is_live: bool = False
@@ -80,7 +80,7 @@ class Conductor:
     ) -> None:
         settings = get_settings()
         self._auth = auth or AuthManager()
-        self._chzzk_engine = StreamLinkEngine(auth=self._auth)
+        self._chzzk_engine = ChzzkLiveEngine(auth=self._auth)
         self._twitcasting_engine: Optional[TwitcastingEngine] = None
         self._x_spaces_engine: Optional[XSpacesEngine] = None
         self._channels: dict[str, ChannelTask] = {}
@@ -757,14 +757,18 @@ class Conductor:
             settings = get_settings()
             quality = settings.recording_quality or "best"
             engine = self._get_engine(task.platform)
-            stream_obj = engine.get_stream(task.channel_id, quality=quality)
-            pipeline = FFmpegPipeline(channel_id=task.channel_id)
+            live_url = engine.get_stream_url(task.channel_id)
+            cookie_str = self._auth.get_ytdlp_cookies()
+
+            pipeline = YtdlpLivePipeline(channel_id=task.channel_id)
             task.pipeline = pipeline
 
             await pipeline.start_recording(
-                stream_obj,
+                stream_obj=live_url,
                 streamer_name=channel_name or task.channel_name,
-                title=title or task.title
+                title=title or task.title,
+                quality=quality,
+                cookie_str=cookie_str,
             )
             logger.info(f"[{composite_key}] 자동 라이브 녹화 시작 (quality={quality}).")
 

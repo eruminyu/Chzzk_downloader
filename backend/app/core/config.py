@@ -81,7 +81,8 @@ class Settings(BaseSettings):
     max_record_retries: int = 3        # 라이브 녹화 자동 재시도 최대 횟수
 
     # ── 녹화 포맷/품질 ─────────────────────────────────────
-    output_format: str = "ts"          # 녹화 출력 포맷: ts, mp4, mkv
+    live_format: str = "ts"            # 라이브 녹화 포맷: ts(권장), mkv, mp4
+    vod_format: str = "mp4"            # VOD 다운로드 포맷: mp4(권장), mkv, ts
     recording_quality: str = "best"    # 녹화 품질: best, 1080p, 720p, 480p
 
     # ── VOD 다운로드 설정 ──────────────────────────────────
