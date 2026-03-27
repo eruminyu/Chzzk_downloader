@@ -130,15 +130,14 @@ install_dependencies() {
     rm -rf "$tmpdir"
   }
 
-  if ! command -v ffmpeg &>/dev/null; then
-    _install_ffmpeg_static
-  else
-    # 이미 설치된 경우 버전 확인 (6.x 이하면 업그레이드)
-    _FFMPEG_MAJOR=$(ffmpeg -version 2>&1 | head -1 | grep -oP '(?<=version )\d+' | head -1)
-    if [ -n "$_FFMPEG_MAJOR" ] && [ "$_FFMPEG_MAJOR" -lt 7 ]; then
-      warn "ffmpeg ${_FFMPEG_MAJOR}.x 감지 — Chzzk HLS(.m4v 세그먼트) 호환을 위해 7.x+ 로 업그레이드합니다."
-      _install_ffmpeg_static
-    fi
+  # 시스템 ffmpeg 버전과 무관하게 항상 정적 빌드를 /usr/local/bin에 설치
+  # (apt 등 패키지 매니저는 OS 버전마다 ffmpeg 버전이 달라 동작 불일치 발생)
+  _install_ffmpeg_static
+
+  # 최소 버전 검증: ffmpeg 8.0+ 필수
+  _FFMPEG_MAJOR=$(ffmpeg -version 2>&1 | head -1 | grep -oP '(?<=version )\d+' | head -1)
+  if [ -z "$_FFMPEG_MAJOR" ] || [ "$_FFMPEG_MAJOR" -lt 8 ]; then
+    error "ffmpeg 8.0 이상이 필요합니다 (현재: ${_FFMPEG_MAJOR:-알 수 없음}.x).\n  설치 스크립트가 최신 빌드를 받아왔는데도 이 오류가 나온다면\n  johnvansickle.com 에서 수동으로 8.0+ 빌드를 설치하세요."
   fi
   info "ffmpeg $(ffmpeg -version 2>&1 | head -1 | awk '{print $3}') ✓"
 

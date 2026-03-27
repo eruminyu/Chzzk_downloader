@@ -19,28 +19,6 @@ from typing import Optional
 from app.core.config import get_settings
 from app.core.logger import logger
 
-# ffmpeg 메이저 버전 캐시 (경로별로 한 번만 실행)
-_ffmpeg_version_cache: dict[str, int] = {}
-
-
-def _ffmpeg_major_version(ffmpeg_path: str) -> int:
-    """ffmpeg 실행 파일의 메이저 버전을 반환한다. 실패 시 0."""
-    if ffmpeg_path in _ffmpeg_version_cache:
-        return _ffmpeg_version_cache[ffmpeg_path]
-    try:
-        import re
-        import subprocess
-        result = subprocess.run(
-            [ffmpeg_path, "-version"],
-            capture_output=True, text=True, timeout=5,
-        )
-        match = re.search(r"ffmpeg version (\d+)\.", result.stdout)
-        major = int(match.group(1)) if match else 0
-    except Exception:
-        major = 0
-    _ffmpeg_version_cache[ffmpeg_path] = major
-    return major
-
 
 class RecordingState(str, Enum):
     """녹화 상태."""
@@ -583,10 +561,8 @@ class YtdlpLivePipeline:
         # HLS URL에 Akamai 인증 토큰이 이미 포함됨 (hdntl=...~hmac=...)
         # ffmpeg 8.0+: extension_picky(기본 true)가 세그먼트 포맷 vs URL 확장자 일치를 강제함.
         # Chzzk CDN은 .m4v 확장자를 사용하지만 MOV 디먹서의 확장자 목록에 없어 거부됨 → 비활성화.
-        # 7.x 이하에는 이 옵션 자체가 없으므로 버전 확인 후 조건부 추가.
-        if _ffmpeg_major_version(ffmpeg_path) >= 8:
-            cmd += ["-extension_picky", "0"]
-        cmd += ["-i", hls_url, "-c", "copy"]
+        # (최소 요구사항: ffmpeg 8.0+)
+        cmd += ["-extension_picky", "0", "-i", hls_url, "-c", "copy"]
 
         # 라이브 HLS → MPEG-TS 출력 강제 (yt-dlp FFmpegFD와 동일)
         cmd += ["-f", "mpegts"]
