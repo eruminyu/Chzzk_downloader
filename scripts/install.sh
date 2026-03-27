@@ -295,8 +295,19 @@ install_service() {
     return 0
   fi
 
+  # 이미 서비스가 등록되어 있으면 재등록 질문 없이 자동 재시작
+  if systemctl is-active --quiet chzzk-recorder 2>/dev/null; then
+    info "기존 서비스 감지 — 업데이트 후 자동 재시작합니다."
+    sudo systemctl daemon-reload
+    sudo systemctl restart chzzk-recorder
+    SERVICE_REGISTERED=true
+    info "서비스 재시작 완료 ✓"
+    info "서비스 상태: sudo systemctl status chzzk-recorder"
+    return 0
+  fi
+
   echo ""
-  # curl | bash 파이프 환경에서는 stdin을 /dev/tty로 강제 연결
+  # 신규 설치: curl | bash 파이프 환경에서는 stdin을 /dev/tty로 강제 연결
   read -rp "$(echo -e "${YELLOW}[?]${NC} systemd 서비스로 등록하시겠습니까? (부팅 시 자동 실행) [y/N]: ")" REPLY </dev/tty
   if [[ "$REPLY" =~ ^[Yy]$ ]]; then
     SERVICE_FILE="/etc/systemd/system/chzzk-recorder.service"
