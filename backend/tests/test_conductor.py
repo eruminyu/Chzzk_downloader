@@ -6,6 +6,7 @@ test_conductor.py
 import pytest
 from unittest.mock import Mock, patch
 from app.engine.conductor import Conductor, ChannelTask
+from app.engine.base import Platform
 
 
 class TestChannelTask:
@@ -69,12 +70,13 @@ class TestConductor:
     def test_add_channel(self, isolated_conductor):
         """채널 등록"""
         conductor = isolated_conductor
+        key = Conductor.make_composite_key(Platform.CHZZK, "test_channel_1")
 
         conductor.add_channel(channel_id="test_channel_1", auto_record=True)
 
         assert conductor.channel_count == 1
-        assert "test_channel_1" in conductor._channels
-        assert conductor._channels["test_channel_1"].auto_record is True
+        assert key in conductor._channels
+        assert conductor._channels[key].auto_record is True
 
     def test_add_multiple_channels(self, isolated_conductor):
         """여러 채널 등록"""
@@ -85,33 +87,35 @@ class TestConductor:
         conductor.add_channel(channel_id="channel_3", auto_record=False)
 
         assert conductor.channel_count == 3
-        assert conductor._channels["channel_1"].auto_record is True
-        assert conductor._channels["channel_2"].auto_record is True
-        assert conductor._channels["channel_3"].auto_record is False
+        assert conductor._channels[Conductor.make_composite_key(Platform.CHZZK, "channel_1")].auto_record is True
+        assert conductor._channels[Conductor.make_composite_key(Platform.CHZZK, "channel_2")].auto_record is True
+        assert conductor._channels[Conductor.make_composite_key(Platform.CHZZK, "channel_3")].auto_record is False
 
     def test_add_duplicate_channel(self, isolated_conductor):
         """중복 채널 등록 (무시됨)"""
         conductor = isolated_conductor
+        key = Conductor.make_composite_key(Platform.CHZZK, "test_channel")
 
         conductor.add_channel(channel_id="test_channel", auto_record=True)
         conductor.add_channel(channel_id="test_channel", auto_record=False)
 
         assert conductor.channel_count == 1
         # 중복 등록은 무시되므로 첫 번째 값 유지
-        assert conductor._channels["test_channel"].auto_record is True
+        assert conductor._channels[key].auto_record is True
 
     @pytest.mark.asyncio
     async def test_remove_channel(self, isolated_conductor):
         """채널 제거"""
         conductor = isolated_conductor
+        key = Conductor.make_composite_key(Platform.CHZZK, "test_channel")
 
         conductor.add_channel(channel_id="test_channel")
         assert conductor.channel_count == 1
 
-        await conductor.remove_channel(channel_id="test_channel")
+        await conductor.remove_channel(key)
 
         assert conductor.channel_count == 0
-        assert "test_channel" not in conductor._channels
+        assert key not in conductor._channels
 
     @pytest.mark.asyncio
     async def test_remove_nonexistent_channel(self, isolated_conductor):
@@ -119,25 +123,26 @@ class TestConductor:
         conductor = isolated_conductor
 
         # 예외 발생 없이 경고 로그만 출력
-        await conductor.remove_channel(channel_id="nonexistent")
+        await conductor.remove_channel(Conductor.make_composite_key(Platform.CHZZK, "nonexistent"))
 
         assert conductor.channel_count == 0
 
     def test_toggle_auto_record(self, isolated_conductor):
         """자동 녹화 토글"""
         conductor = isolated_conductor
+        key = Conductor.make_composite_key(Platform.CHZZK, "test_channel")
 
         conductor.add_channel(channel_id="test_channel", auto_record=True)
 
         # True → False
-        new_value = conductor.toggle_auto_record(channel_id="test_channel")
+        new_value = conductor.toggle_auto_record(key)
         assert new_value is False
-        assert conductor._channels["test_channel"].auto_record is False
+        assert conductor._channels[key].auto_record is False
 
         # False → True
-        new_value = conductor.toggle_auto_record(channel_id="test_channel")
+        new_value = conductor.toggle_auto_record(key)
         assert new_value is True
-        assert conductor._channels["test_channel"].auto_record is True
+        assert conductor._channels[key].auto_record is True
 
     def test_toggle_auto_record_nonexistent(self, isolated_conductor):
         """존재하지 않는 채널의 자동 녹화 토글 시도"""
@@ -145,7 +150,7 @@ class TestConductor:
 
         # Conductor.toggle_auto_record는 ValueError 발생
         with pytest.raises(ValueError, match="찾을 수 없습니다"):
-            conductor.toggle_auto_record(channel_id="nonexistent")
+            conductor.toggle_auto_record(Conductor.make_composite_key(Platform.CHZZK, "nonexistent"))
 
     def test_get_all_status_empty(self, isolated_conductor):
         """빈 채널 목록 상태 조회"""
@@ -224,11 +229,14 @@ class TestConductor:
         conductor2._channels.clear()
         conductor2._load_persistence()
 
+        key1 = Conductor.make_composite_key(Platform.CHZZK, "channel_1")
+        key2 = Conductor.make_composite_key(Platform.CHZZK, "channel_2")
+
         assert conductor2.channel_count == 2
-        assert "channel_1" in conductor2._channels
-        assert "channel_2" in conductor2._channels
-        assert conductor2._channels["channel_1"].auto_record is True
-        assert conductor2._channels["channel_2"].auto_record is False
+        assert key1 in conductor2._channels
+        assert key2 in conductor2._channels
+        assert conductor2._channels[key1].auto_record is True
+        assert conductor2._channels[key2].auto_record is False
 
     def test_persistence_load_nonexistent_file(self, tmp_path):
         """존재하지 않는 파일 로드 시도 (예외 없음)"""

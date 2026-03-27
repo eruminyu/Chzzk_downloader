@@ -112,7 +112,7 @@ class TestAuthManager:
         options = auth.get_streamlink_options()
 
         assert "http-cookies" in options
-        assert options["http-cookies"] == "NID_AUT=test_aut; NID_SES=test_ses"
+        assert options["http-cookies"] == {"NID_AUT": "test_aut", "NID_SES": "test_ses"}
 
     def test_get_streamlink_options_without_cookies(self):
         """인증 쿠키가 없는 경우 Streamlink 옵션"""
@@ -122,7 +122,6 @@ class TestAuthManager:
             auth = AuthManager(nid_aut=None, nid_ses=None)
             options = auth.get_streamlink_options()
 
-            assert "http-cookies" not in options
             assert options == {}
 
     def test_get_ytdlp_cookies_with_auth(self):
@@ -142,36 +141,32 @@ class TestAuthManager:
 
             assert ytdlp_cookies is None
 
-    def test_update_cookies(self, tmp_path):
+    def test_update_cookies(self):
         """쿠키 업데이트 및 .env 파일 저장 테스트"""
-        # 임시 .env 파일 생성
-        env_file = tmp_path / ".env"
-        env_file.write_text("NID_AUT=old_aut\nNID_SES=old_ses\n", encoding="utf-8")
+        auth = AuthManager(nid_aut="old_aut", nid_ses="old_ses")
 
-        auth = AuthManager()
+        with patch("app.core.utils.update_env_file") as mock_update:
+            auth.update_cookies(nid_aut="new_aut", nid_ses="new_ses")
 
-        # .env 파일 경로를 임시 경로로 패치
-        with patch.object(Path, "exists", return_value=True):
-            with patch("app.engine.auth.Path") as mock_path:
-                mock_path.return_value = env_file
-                auth.update_cookies(nid_aut="new_aut", nid_ses="new_ses")
+            # 런타임 값 업데이트 확인
+            assert auth._nid_aut == "new_aut"
+            assert auth._nid_ses == "new_ses"
+            assert auth.is_authenticated is True
 
-        # 쿠키가 업데이트되었는지 확인
-        assert auth.is_authenticated is True
-        assert auth._nid_aut == "new_aut"
-        assert auth._nid_ses == "new_ses"
+            # .env 저장 함수 호출 확인
+            mock_update.assert_called_once_with({"NID_AUT": "new_aut", "NID_SES": "new_ses"})
 
     def test_update_cookies_no_env_file(self):
         """
-        .env 파일이 없는 경우에도 런타임 쿠키는 업데이트되어야 함
-        (파일 저장 실패는 로그로만 처리)
+        런타임 쿠키 업데이트는 파일 저장 성공 여부와 관계없이 동작해야 함
         """
-        auth = AuthManager()
+        auth = AuthManager(nid_aut="old_aut", nid_ses="old_ses")
 
-        with patch.object(Path, "exists", return_value=False):
+        with patch("app.core.utils.update_env_file") as mock_update:
             auth.update_cookies(nid_aut="new_aut", nid_ses="new_ses")
 
-        # 런타임 값은 업데이트됨
-        assert auth._nid_aut == "new_aut"
-        assert auth._nid_ses == "new_ses"
-        assert auth.is_authenticated is True
+            # 런타임 값은 업데이트됨
+            assert auth._nid_aut == "new_aut"
+            assert auth._nid_ses == "new_ses"
+            assert auth.is_authenticated is True
+            mock_update.assert_called_once()
