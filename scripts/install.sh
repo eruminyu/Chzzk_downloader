@@ -95,8 +95,9 @@ install_dependencies() {
   fi
   info "curl ✓"
 
-  # ffmpeg 8.0+ 정적 빌드 설치
-  # 출처: BtbN/FFmpeg-Builds (GitHub) — GitHub API로 실제 파일명 동적 조회
+  # ffmpeg 설치 — 최신 정적 빌드 권장 (BtbN/FFmpeg-Builds)
+  # apt 기본 버전(6.x)도 동작하나, 7.1.1+ 에서 Chzzk CDN .m4v 확장자 문제가
+  # 자동으로 처리됩니다. 가능하면 최신 빌드를 권장합니다.
   _install_ffmpeg_static() {
     local arch pattern
     arch=$(uname -m)
@@ -141,10 +142,14 @@ install_dependencies() {
   # 항상 정적 빌드 설치 (패키지 매니저 버전 무시)
   _install_ffmpeg_static
 
-  # 최소 버전 검증: ffmpeg 8.0+ 필수
+  # 최소 버전 검증: ffmpeg 6.0+ 필수 (7.1.1+ 권장)
   _FFMPEG_MAJOR=$(ffmpeg -version 2>&1 | head -1 | grep -oP '(?<=version )\d+' | head -1)
-  if [ -z "$_FFMPEG_MAJOR" ] || [ "$_FFMPEG_MAJOR" -lt 8 ]; then
-    error "ffmpeg 8.0 이상이 필요합니다 (현재: ${_FFMPEG_MAJOR:-알 수 없음}.x).\n  https://github.com/BtbN/FFmpeg-Builds/releases 에서 수동 설치하세요."
+  if [ -z "$_FFMPEG_MAJOR" ] || [ "$_FFMPEG_MAJOR" -lt 6 ]; then
+    error "ffmpeg 6.0 이상이 필요합니다 (현재: ${_FFMPEG_MAJOR:-알 수 없음}.x).\n  7.1.1+ 또는 최신 정적 빌드를 권장합니다.\n  https://github.com/BtbN/FFmpeg-Builds/releases 에서 수동 설치하세요."
+  fi
+  _FFMPEG_VER=$(ffmpeg -version 2>&1 | head -1 | awk '{print $3}')
+  if [ "$_FFMPEG_MAJOR" -lt 7 ]; then
+    warn "ffmpeg ${_FFMPEG_VER} 감지 — 7.1.1+ 권장. Chzzk CDN 호환성 자동 적용."
   fi
   info "ffmpeg $(ffmpeg -version 2>&1 | head -1 | awk '{print $3}') ✓"
 

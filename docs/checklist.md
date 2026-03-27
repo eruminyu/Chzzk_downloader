@@ -1,6 +1,39 @@
 # Chzzk-Recorder-Pro 개발 체크리스트
 
+## 2026-03-27: FFmpeg 버전 조건부 호환성 처리
+
+### 배경
+- ffmpeg 7.1.1+의 `extension_picky` 보안 패치: Chzzk CDN `.m4v` 확장자 세그먼트 거부
+- 기존 코드: `-extension_picky 0` 하드코딩 → ffmpeg 6.x(apt 기본)에서 "unrecognized option" 오류
+- `install.sh`의 8.0+ 버전 강제 검증 → 404 / 진입 장벽 문제
+
+### 수정 내용
+- [x] `backend/app/core/utils.py`: `get_ffmpeg_version()` 함수 추가
+  - `ffmpeg -version` 파싱 → `(major, minor, patch)` 튜플 반환
+  - `lru_cache` 로 최초 1회만 실행, 이후 캐시
+  - 파싱 실패 시 `(0, 0, 0)` 반환 (옵션 생략 방향으로 안전 처리)
+- [x] `backend/app/core/utils.py`: `ffmpeg_supports_extension_picky()` 함수 추가
+  - 7.1.1+ / 8.0+ 이상 → `True` (옵션 추가 필요)
+  - 6.x 이하 → `False` (옵션 생략, 이슈 없음)
+- [x] `backend/app/engine/pipeline.py`: `-extension_picky 0` 조건부 적용
+  - `ffmpeg_supports_extension_picky()` 기반으로 버전에 따라 분기
+  - 로컬 import 제거 → 파일 상단 import로 정리
+- [x] `scripts/install.sh`: 최소 버전 기준 완화
+  - `8.0+` 강제 → `6.0+` 최소, `7.1.1+` 권장으로 변경
+  - 6.x 감지 시 warn 메시지 출력 (에러 아님)
+- [x] `Dockerfile`: 주석 업데이트 (apt 6.x 정상 동작 명시)
+
+### 수정 후 동작
+| ffmpeg 버전 | `-extension_picky 0` 추가 여부 | 동작 |
+|---|---|---|
+| 6.x (apt 기본, Docker) | ❌ 생략 | Chzzk 녹화 정상 (.m4v 이슈 없음) |
+| 7.0 | ❌ 생략 | 정상 (패치 미적용 버전) |
+| 7.1.0 | ❌ 생략 | 정상 |
+| 7.1.1+ | ✅ 추가 | Chzzk .m4v 세그먼트 정상 처리 |
+| 8.0+ | ✅ 추가 | 정상 |
+
 ## 2026-03-27: YtdlpLivePipeline 2-Phase 아키텍처 + ffmpeg 8.0 호환성
+
 
 - [x] `pipeline.py`: yt-dlp subprocess 다운로드 → **yt-dlp URL 추출(`-j`) + ffmpeg 직접 녹화** 2단계로 리팩토링
   - yt-dlp는 라이브 HLS에 무조건 FFmpegFD 사용 (소스코드 하드코딩, `--downloader native` 무시)

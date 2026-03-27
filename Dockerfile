@@ -17,7 +17,9 @@ FROM python:3.12-slim AS runtime
 
 WORKDIR /app
 
-# 시스템 패키지 설치 (ffmpeg + streamlink)
+# 시스템 패키지 설치
+# ffmpeg: apt 기본 6.x 버전 사용 (7.1.1+ 고유 extension_picky 이슈 없음)
+# 런타임에 버전을 자동 감지하여 필요한 옵션만 적용됨
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     streamlink \

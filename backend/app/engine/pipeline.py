@@ -18,6 +18,7 @@ from typing import Optional
 
 from app.core.config import get_settings
 from app.core.logger import logger
+from app.core.utils import ffmpeg_supports_extension_picky
 
 
 class RecordingState(str, Enum):
@@ -559,10 +560,14 @@ class YtdlpLivePipeline:
         cmd = [ffmpeg_path, "-hide_banner", "-loglevel", "error"]
 
         # HLS URL에 Akamai 인증 토큰이 이미 포함됨 (hdntl=...~hmac=...)
-        # ffmpeg 8.0+: extension_picky(기본 true)가 세그먼트 포맷 vs URL 확장자 일치를 강제함.
-        # Chzzk CDN은 .m4v 확장자를 사용하지만 MOV 디먹서의 확장자 목록에 없어 거부됨 → 비활성화.
-        # (최소 요구사항: ffmpeg 8.0+)
-        cmd += ["-extension_picky", "0", "-i", hls_url, "-c", "copy"]
+        # extension_picky(기본 true)가 세그먼트 포맷 vs URL 확장자 일치를 강제함.
+        # Chzzk CDN은 .m4v 확장자를 사용하지만 MOV 디먹서의 확장자 목록에 없어 거부됨.
+        # → ffmpeg 7.1.1+ 에서 엄격해진 보안 패치: 해당 버전 이상에서만 비활성화.
+        # → ffmpeg 6.x (apt 기본) 등 구버전에서는 옵션 자체가 없거나 불필요하므로 생략.
+        if ffmpeg_supports_extension_picky(ffmpeg_path):
+            cmd += ["-extension_picky", "0"]
+            logger.debug(f"[{self._channel_id}] extension_picky 비활성화 적용 (ffmpeg 7.1.1+)")
+        cmd += ["-i", hls_url, "-c", "copy"]
 
         # 라이브 HLS → MPEG-TS 출력 강제 (yt-dlp FFmpegFD와 동일)
         cmd += ["-f", "mpegts"]
