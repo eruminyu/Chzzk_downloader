@@ -143,15 +143,16 @@ install_dependencies() {
   _install_ffmpeg_static
 
   # 최소 버전 검증: ffmpeg 6.0+ 필수 (7.1.1+ 권장)
-  _FFMPEG_MAJOR=$(ffmpeg -version 2>&1 | head -1 | grep -oP '(?<=version )\d+' | head -1)
-  if [ -z "$_FFMPEG_MAJOR" ] || [ "$_FFMPEG_MAJOR" -lt 6 ]; then
-    error "ffmpeg 6.0 이상이 필요합니다 (현재: ${_FFMPEG_MAJOR:-알 수 없음}.x).\n  7.1.1+ 또는 최신 정적 빌드를 권장합니다.\n  https://github.com/BtbN/FFmpeg-Builds/releases 에서 수동 설치하세요."
-  fi
+  # BtbN 빌드는 "version n8.0", apt는 "version 6.1.1" 형태 → n/N 접두사 처리
   _FFMPEG_VER=$(ffmpeg -version 2>&1 | head -1 | awk '{print $3}')
+  _FFMPEG_MAJOR=$(echo "$_FFMPEG_VER" | sed 's/^[nN]//' | cut -d. -f1)
+  if [ -z "$_FFMPEG_MAJOR" ] || ! [ "$_FFMPEG_MAJOR" -eq "$_FFMPEG_MAJOR" ] 2>/dev/null || [ "$_FFMPEG_MAJOR" -lt 6 ]; then
+    error "ffmpeg 6.0 이상이 필요합니다 (현재: ${_FFMPEG_VER:-알 수 없음}).\n  7.1.1+ 또는 최신 정적 빌드를 권장합니다.\n  https://github.com/BtbN/FFmpeg-Builds/releases"
+  fi
   if [ "$_FFMPEG_MAJOR" -lt 7 ]; then
     warn "ffmpeg ${_FFMPEG_VER} 감지 — 7.1.1+ 권장. Chzzk CDN 호환성 자동 적용."
   fi
-  info "ffmpeg $(ffmpeg -version 2>&1 | head -1 | awk '{print $3}') ✓"
+  info "ffmpeg ${_FFMPEG_VER} ✓"
 
   # Python 3.10+
   PYTHON_CMD=""
