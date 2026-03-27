@@ -95,9 +95,9 @@ install_dependencies() {
   fi
   info "curl ✓"
 
-  # ffmpeg 설치 — 최신 정적 빌드 권장 (BtbN/FFmpeg-Builds)
-  # apt 기본 버전(6.x)도 동작하나, 7.1.1+ 에서 Chzzk CDN .m4v 확장자 문제가
-  # 자동으로 처리됩니다. 가능하면 최신 빌드를 권장합니다.
+  # ffmpeg 설치
+  # Ubuntu/Debian: apt 기본(6.x) 사용 — Streamlink 파이프 모드 기준으로 6.x로 충분
+  # 그 외 OS: BtbN 정적 빌드 fallback
   _install_ffmpeg_static() {
     local arch pattern
     arch=$(uname -m)
@@ -139,18 +139,21 @@ install_dependencies() {
     rm -rf "$tmpdir"
   }
 
-  # 항상 정적 빌드 설치 (패키지 매니저 버전 무시)
-  _install_ffmpeg_static
+  if ! command -v ffmpeg &>/dev/null; then
+    if [ "$PKG_MANAGER" = "apt" ]; then
+      info "ffmpeg 설치 중 (apt)..."
+      sudo apt-get install -y ffmpeg
+    else
+      info "ffmpeg 정적 빌드 설치 중..."
+      _install_ffmpeg_static
+    fi
+  fi
 
-  # 최소 버전 검증: ffmpeg 6.0+ 필수 (7.1.1+ 권장)
-  # BtbN 빌드는 "version n8.0", apt는 "version 6.1.1" 형태 → n/N 접두사 처리
+  # 최소 버전 검증: ffmpeg 6.0+
   _FFMPEG_VER=$(ffmpeg -version 2>&1 | head -1 | awk '{print $3}')
   _FFMPEG_MAJOR=$(echo "$_FFMPEG_VER" | sed 's/^[nN]//' | cut -d. -f1)
   if [ -z "$_FFMPEG_MAJOR" ] || ! [ "$_FFMPEG_MAJOR" -eq "$_FFMPEG_MAJOR" ] 2>/dev/null || [ "$_FFMPEG_MAJOR" -lt 6 ]; then
-    error "ffmpeg 6.0 이상이 필요합니다 (현재: ${_FFMPEG_VER:-알 수 없음}).\n  7.1.1+ 또는 최신 정적 빌드를 권장합니다.\n  https://github.com/BtbN/FFmpeg-Builds/releases"
-  fi
-  if [ "$_FFMPEG_MAJOR" -lt 7 ]; then
-    warn "ffmpeg ${_FFMPEG_VER} 감지 — 7.1.1+ 권장. Chzzk CDN 호환성 자동 적용."
+    error "ffmpeg 6.0 이상이 필요합니다 (현재: ${_FFMPEG_VER:-알 수 없음}).\n  sudo apt install ffmpeg 로 설치하세요."
   fi
   info "ffmpeg ${_FFMPEG_VER} ✓"
 
