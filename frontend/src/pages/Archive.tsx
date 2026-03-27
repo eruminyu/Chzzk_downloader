@@ -259,9 +259,9 @@ function TwitcastingTab() {
     );
 }
 
-// ── Twitter Spaces 탭 ────────────────────────────────────
+// ── X Spaces 탭 ────────────────────────────────────
 
-function TwitterSpacesTab() {
+function XSpacesTab() {
     const [url, setUrl] = useState("");
     const [loading, setLoading] = useState(false);
     const { addTask } = useVod();
@@ -274,7 +274,7 @@ function TwitterSpacesTab() {
         try {
             await addTask(url.trim());
             setUrl("");
-            toast.success("Twitter Spaces 아카이브 다운로드가 시작되었습니다.");
+            toast.success("X Spaces 아카이브 다운로드가 시작되었습니다.");
         } catch (err: unknown) {
             toast.error(getErrorMessage(err, "다운로드 시작에 실패했습니다."));
         } finally {
@@ -287,10 +287,10 @@ function TwitterSpacesTab() {
             <div className="bg-zinc-900/50 p-6 rounded-xl border border-zinc-800 space-y-4">
                 <div>
                     <label className="block text-sm font-medium text-zinc-300 mb-1">
-                        Twitter Spaces URL
+                        X Spaces URL
                     </label>
                     <p className="text-xs text-zinc-500 mb-3">
-                        Twitter API 한계로 목록 조회는 지원되지 않습니다. Space URL을 직접 입력하세요.
+                        X API 한계로 목록 조회는 지원되지 않습니다. Space URL을 직접 입력하세요.
                     </p>
                 </div>
 
@@ -332,11 +332,11 @@ function TwitterSpacesTab() {
 
 // ── 메인 Archive 페이지 ──────────────────────────────────
 
-type TabKey = "twitcasting" | "twitter_spaces";
+type TabKey = "twitcasting" | "x_spaces";
 
 const TABS: { key: TabKey; label: string; color: string }[] = [
     { key: "twitcasting", label: "TwitCasting", color: "orange" },
-    { key: "twitter_spaces", label: "Twitter Spaces", color: "cyan" },
+    { key: "x_spaces", label: "X Spaces", color: "cyan" },
 ];
 
 export default function ArchivePage() {
@@ -351,7 +351,7 @@ export default function ArchivePage() {
                     Archive Downloader
                 </h2>
                 <p className="text-zinc-400 text-sm mt-1">
-                    TwitCasting 과거 방송 및 Twitter Spaces 아카이브를 다운로드합니다.
+                    TwitCasting 과거 방송 및 X Spaces 아카이브를 다운로드합니다.
                 </p>
             </div>
 
@@ -377,7 +377,7 @@ export default function ArchivePage() {
 
             {/* 탭 콘텐츠 */}
             {activeTab === "twitcasting" && <TwitcastingTab />}
-            {activeTab === "twitter_spaces" && <TwitterSpacesTab />}
+            {activeTab === "x_spaces" && <XSpacesTab />}
         </div>
     );
 }

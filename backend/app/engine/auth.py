@@ -70,14 +70,6 @@ class AuthManager:
             headers["Cookie"] = cookies.to_cookie_string()
         return headers
 
-    def get_streamlink_options(self) -> dict[str, str]:
-        """Streamlink 세션에 전달할 HTTP 헤더 옵션 반환."""
-        options: dict[str, str] = {}
-        cookies = self.get_cookies()
-        if cookies:
-            options["http-cookies"] = cookies.to_cookie_string()
-        return options
-
     def get_ytdlp_cookies(self) -> Optional[str]:
         """yt-dlp용 쿠키 파일 경로 또는 쿠키 문자열 반환.
 

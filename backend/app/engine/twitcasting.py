@@ -1,7 +1,7 @@
 """
 Chzzk-Recorder-Pro: TwitCasting 엔진
 TwitCasting API v2로 라이브 상태를 확인하고,
-Streamlink twitcasting.tv 플러그인으로 스트림을 추출한다.
+라이브 URL을 반환한다. 스트림 다운로드는 YtdlpLivePipeline에서 처리한다.
 """
 
 from __future__ import annotations
@@ -10,7 +10,6 @@ import base64
 from typing import Optional
 
 import httpx
-import streamlink
 
 from app.core.config import get_settings
 from app.core.logger import logger
@@ -155,32 +154,18 @@ class TwitcastingEngine:
 
         return {"total_count": total_count, "movies": movies}
 
-    def get_stream(self, channel_id: str, quality: str = "best") -> streamlink.Stream:
-        """Streamlink twitcasting.tv 플러그인으로 스트림 객체를 반환한다.
+    def get_stream_url(self, channel_id: str) -> str:
+        """TwitCasting 라이브 URL을 반환한다.
 
-        Chzzk 쿠키는 주입하지 않는다 (별도 세션 사용).
+        실제 스트림 추출은 yt-dlp가 처리한다.
 
         Args:
             channel_id: TwitCasting 사용자 ID
-            quality: 화질 (best, worst 등)
 
         Returns:
-            Streamlink Stream 객체.
+            TwitCasting 라이브 URL 문자열.
         """
-        live_url = TWITCASTING_LIVE_URL.format(channel_id=channel_id)
-        session = streamlink.Streamlink()
-        session.set_option("hls-live-edge", 3)
-        session.set_option("hls-segment-attempts", 5)
-        session.set_option("hls-segment-timeout", 15.0)
-
-        streams = session.streams(live_url)
-        if not streams:
-            raise RuntimeError(f"TwitCasting 채널 '{channel_id}'이(가) 오프라인이거나 스트림을 찾을 수 없습니다.")
-
-        if quality not in streams:
-            quality = "best"
-
-        return streams[quality]
+        return TWITCASTING_LIVE_URL.format(channel_id=channel_id)
 
     @staticmethod
     def _offline_status(channel_id: str) -> LiveStatus:

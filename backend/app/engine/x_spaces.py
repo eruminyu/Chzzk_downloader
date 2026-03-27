@@ -1,5 +1,5 @@
 """
-Chzzk-Recorder-Pro: Twitter Spaces 엔진
+Chzzk-Recorder-Pro: X Spaces 엔진
 비공식 GraphQL API + 쿠키 인증으로 Space 라이브 상태를 확인하고,
 라이브 중일 때 dynamic_playlist.m3u8 URL을 캡처하여 반환한다.
 
@@ -7,10 +7,10 @@ Chzzk-Recorder-Pro: Twitter Spaces 엔진
 
 인증 방식:
 - Netscape 형식 쿠키 파일에서 auth_token, ct0 추출
-- Twitter 내부 GraphQL API 호출 (비공식)
+- X 내부 GraphQL API 호출 (비공식)
 
 참고:
-- AudioSpaceById QUERY_ID는 Twitter 배포마다 변경될 수 있음
+- AudioSpaceById QUERY_ID는 X 배포마다 변경될 수 있음
 - channel_id: @핸들 제외한 username (예: KalserianT)
 """
 
@@ -31,22 +31,22 @@ from app.core.logger import logger
 from app.engine.base import LiveStatus
 
 # ── 상수 ────────────────────────────────────────────────────────────
-TWITTER_SPACES_URL = "https://x.com/i/spaces/{space_id}"
+X_SPACES_URL = "https://x.com/i/spaces/{space_id}"
 
-# Twitter 웹 클라이언트에 하드코딩된 공개 Bearer 토큰
+# X 웹 클라이언트에 하드코딩된 공개 Bearer 토큰
 _BEARER_TOKEN = (
     "AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs"
     "%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA"
 )
 
-# GraphQL QUERY_ID — Twitter 배포마다 변경될 수 있음
+# GraphQL QUERY_ID — X 배포마다 변경될 수 있음
 # twspace-dl 및 yt-dlp 소스에서 최신값 확인 가능
 _AUDIO_SPACE_BY_ID_QUERY_ID = "HPEisOmj1epUNLCWTYhUWw"
 _USER_BY_SCREEN_NAME_QUERY_ID = "G3KGOASz96M-Qu0nwmGXNg"
 
 
-class TwitterSpacesEngine:
-    """Twitter Spaces 라이브 감지 + m3u8 URL 캡처 엔진.
+class XSpacesEngine:
+    """X Spaces 라이브 감지 + m3u8 URL 캡처 엔진.
 
     라이브 감지: 비공식 GraphQL AudioSpaceById API (쿠키 인증)
     감지 방식: username → user_id → 활성 Space 확인
@@ -58,25 +58,25 @@ class TwitterSpacesEngine:
         """비공식 GraphQL API로 사용자의 활성 Space를 확인하고 m3u8 URL을 캡처한다.
 
         Args:
-            channel_id: Twitter username (예: "KalserianT"). @핸들 제외.
+            channel_id: X username (예: "KalserianT"). @핸들 제외.
 
         Returns:
             LiveStatus 딕셔너리.
             is_live=True 시 space_id와 m3u8_url 포함.
         """
         settings = get_settings()
-        cookie_file = settings.twitter_cookie_file
+        cookie_file = settings.x_cookie_file
 
         if not cookie_file or not Path(cookie_file).is_file():
             logger.warning(
-                f"[TwitterSpaces:{channel_id}] 쿠키 파일이 설정되지 않았거나 없습니다: {cookie_file}"
+                f"[XSpaces:{channel_id}] 쿠키 파일이 설정되지 않았거나 없습니다: {cookie_file}"
             )
             return self._offline_status(channel_id)
 
         cookies = _parse_netscape_cookies(cookie_file)
         if not cookies.get("auth_token") or not cookies.get("ct0"):
             logger.warning(
-                f"[TwitterSpaces:{channel_id}] 쿠키 파일에서 auth_token/ct0를 찾을 수 없습니다."
+                f"[XSpaces:{channel_id}] 쿠키 파일에서 auth_token/ct0를 찾을 수 없습니다."
             )
             return self._offline_status(channel_id)
 
@@ -92,15 +92,15 @@ class TwitterSpacesEngine:
                 # 1단계: username → user_id
                 user_id = await _get_user_id(client, channel_id)
                 if user_id is None:
-                    logger.warning(f"[TwitterSpaces:{channel_id}] user_id 조회 실패.")
+                    logger.warning(f"[XSpaces:{channel_id}] user_id 조회 실패.")
                     return self._offline_status(channel_id)
 
-                logger.info(f"[TwitterSpaces:{channel_id}] user_id 조회 성공: {user_id}")
+                logger.info(f"[XSpaces:{channel_id}] user_id 조회 성공: {user_id}")
 
                 # 2단계: 활성 Space 조회
                 space_info = await _get_active_space(client, user_id, channel_id)
                 if space_info is None:
-                    logger.info(f"[TwitterSpaces:{channel_id}] 활성 Space 없음 (오프라인).")
+                    logger.info(f"[XSpaces:{channel_id}] 활성 Space 없음 (오프라인).")
                     return self._offline_status(channel_id)
 
                 space_id = space_info["space_id"]
@@ -113,7 +113,7 @@ class TwitterSpacesEngine:
                     m3u8_url = await _get_m3u8_url(client, media_key, channel_id)
 
                 logger.info(
-                    f"[TwitterSpaces:{channel_id}] 라이브 Space 감지: {space_id} — {title}"
+                    f"[XSpaces:{channel_id}] 라이브 Space 감지: {space_id} — {title}"
                     + (f" (m3u8 캡처 완료)" if m3u8_url else " (m3u8 캡처 실패)")
                 )
 
@@ -122,7 +122,7 @@ class TwitterSpacesEngine:
                     is_live=True,
                     channel_name=channel_id,
                     title=title,
-                    category="Twitter Spaces",
+                    category="X Spaces",
                     viewer_count=0,
                     thumbnail_url="",
                     profile_image_url="",
@@ -133,28 +133,28 @@ class TwitterSpacesEngine:
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 401:
                 logger.warning(
-                    f"[TwitterSpaces:{channel_id}] 쿠키 인증 만료 (401). "
+                    f"[XSpaces:{channel_id}] 쿠키 인증 만료 (401). "
                     "쿠키 파일을 다시 추출해주세요."
                 )
             else:
                 logger.error(
-                    f"[TwitterSpaces:{channel_id}] HTTP 오류 {e.response.status_code}: {e}"
+                    f"[XSpaces:{channel_id}] HTTP 오류 {e.response.status_code}: {e}"
                 )
             return self._offline_status(channel_id)
         except httpx.RequestError as e:
-            logger.error(f"[TwitterSpaces:{channel_id}] 네트워크 오류: {e}")
+            logger.error(f"[XSpaces:{channel_id}] 네트워크 오류: {e}")
             return self._offline_status(channel_id)
         except Exception as e:
-            logger.error(f"[TwitterSpaces:{channel_id}] 예상치 못한 오류: {e}", exc_info=e)
+            logger.error(f"[XSpaces:{channel_id}] 예상치 못한 오류: {e}", exc_info=e)
             return self._offline_status(channel_id)
 
     def get_stream(self, channel_id: str, quality: str = "best") -> object:
-        """Twitter Spaces는 streamlink 미지원.
+        """X Spaces는 streamlink 미지원.
 
         대신 캡처된 m3u8 URL을 VodEngine으로 다운로드할 것.
         """
         raise NotImplementedError(
-            "Twitter Spaces는 streamlink를 지원하지 않습니다. "
+            "X Spaces는 streamlink를 지원하지 않습니다. "
             "캡처된 m3u8_url을 VodEngine에 전달하세요."
         )
 
@@ -166,17 +166,17 @@ class TwitterSpacesEngine:
         title: Optional[str] = None,
         cookie_file: Optional[str] = None,
     ) -> object:
-        """yt-dlp subprocess로 Twitter Spaces를 다운로드한다.
+        """yt-dlp subprocess로 X Spaces를 다운로드한다.
 
         m3u8 URL 캡처에 실패했을 때의 fallback — space_id URL로 시도.
         """
         import asyncio
 
         ytdlp_path = self._resolve_ytdlp_path()
-        space_url = TWITTER_SPACES_URL.format(space_id=space_id)
+        space_url = X_SPACES_URL.format(space_id=space_id)
 
         safe_channel = _sanitize_filename(channel_name)
-        safe_title = _sanitize_filename(title or "Twitter Spaces")
+        safe_title = _sanitize_filename(title or "X Spaces")
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"[{safe_channel}] {safe_title}_{timestamp}.m4a"
 
@@ -195,9 +195,9 @@ class TwitterSpacesEngine:
         if cookie_file and Path(cookie_file).is_file():
             cmd.extend(["--cookies", cookie_file])
         elif cookie_file:
-            logger.warning(f"[TwitterSpaces] 쿠키 파일을 찾을 수 없습니다: {cookie_file}")
+            logger.warning(f"[XSpaces] 쿠키 파일을 찾을 수 없습니다: {cookie_file}")
 
-        logger.info(f"[TwitterSpaces] yt-dlp 다운로드 시작: {output_path}")
+        logger.info(f"[XSpaces] yt-dlp 다운로드 시작: {output_path}")
 
         process = await asyncio.create_subprocess_exec(
             *cmd,
@@ -247,7 +247,7 @@ class TwitterSpacesEngine:
 # ── 내부 헬퍼 함수 ───────────────────────────────────────────────────
 
 def _parse_netscape_cookies(cookie_file: str) -> dict[str, str]:
-    """Netscape 형식 쿠키 파일에서 Twitter 인증에 필요한 쿠키를 추출한다.
+    """Netscape 형식 쿠키 파일에서 X 인증에 필요한 쿠키를 추출한다.
 
     Returns:
         {"auth_token": "...", "ct0": "...", ...} 형태의 딕셔너리.
@@ -275,7 +275,7 @@ def _parse_netscape_cookies(cookie_file: str) -> dict[str, str]:
 
 
 def _build_headers(ct0: str) -> dict[str, str]:
-    """Twitter 내부 API 호출에 필요한 헤더를 구성한다."""
+    """X 내부 API 호출에 필요한 헤더를 구성한다."""
     return {
         "Authorization": f"Bearer {_BEARER_TOKEN}",
         "x-csrf-token": ct0,
@@ -366,7 +366,7 @@ async def _get_active_space(
         "responsive_web_enhance_cards_enabled": False,
     })
 
-    # 여러 QUERY_ID 후보를 순서대로 시도 (Twitter 배포마다 변경되므로)
+    # 여러 QUERY_ID 후보를 순서대로 시도 (X 배포마다 변경되므로)
     query_ids = [
         "V7H0Ap3_Hh2FyS75OCDO3Q",  # UserTweets (최신 추정)
         "CdG2Vuc1v6F5JyEngGpxVw",  # UserTweets (구버전)
@@ -389,7 +389,7 @@ async def _get_active_space(
             return None
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 429:
-                logger.warning(f"[TwitterSpaces:{username}] UserTweets 레이트 리밋 (429). 다음 폴링까지 대기.")
+                logger.warning(f"[XSpaces:{username}] UserTweets 레이트 리밋 (429). 다음 폴링까지 대기.")
             else:
                 logger.warning(f"UserTweets HTTP 오류 (qid={qid}): {e.response.status_code} — {e.response.text[:200]}")
             continue
@@ -398,7 +398,7 @@ async def _get_active_space(
             continue
 
     # 타임라인 실패 시 AudioSpaceById로 직접 시도 (space_id를 모르면 불가, fallback 없음)
-    logger.warning(f"[TwitterSpaces:{username}] 모든 타임라인 쿼리 실패.")
+    logger.warning(f"[XSpaces:{username}] 모든 타임라인 쿼리 실패.")
     return None
 
 
@@ -437,7 +437,7 @@ def _extract_space_from_timeline(data: dict) -> Optional[dict]:
                                 if b.get("key") == "title":
                                     title = b.get("value", {}).get("string_value", "")
                                     break
-                            return {"space_id": space_id, "title": title or "Twitter Spaces", "media_key": None}
+                            return {"space_id": space_id, "title": title or "X Spaces", "media_key": None}
     except Exception:
         pass
     return None
@@ -472,7 +472,7 @@ async def get_space_by_id(
         metadata = data.get("data", {}).get("audioSpace", {}).get("metadata", {})
         state = metadata.get("state", "")  # "Running" or "Ended" or "NotStarted"
         media_key = metadata.get("media_key")
-        title = metadata.get("title", "Twitter Spaces")
+        title = metadata.get("title", "X Spaces")
         return {"state": state, "media_key": media_key, "title": title}
     except Exception as e:
         logger.debug(f"AudioSpaceById 조회 실패 (space_id={space_id}): {e}")
@@ -495,10 +495,10 @@ async def _get_m3u8_url(
         location = data.get("source", {}).get("location", "")
         if location and "m3u8" in location:
             return location
-        logger.debug(f"[TwitterSpaces:{username}] m3u8 URL 없음. 응답: {str(data)[:200]}")
+        logger.debug(f"[XSpaces:{username}] m3u8 URL 없음. 응답: {str(data)[:200]}")
         return None
     except Exception as e:
-        logger.debug(f"[TwitterSpaces:{username}] live_video_stream 조회 실패: {e}")
+        logger.debug(f"[XSpaces:{username}] live_video_stream 조회 실패: {e}")
         return None
 
 
@@ -511,9 +511,9 @@ def _sanitize_filename(name: str) -> str:
 
 
 async def verify_cookie(cookie_file: str) -> dict:
-    """쿠키 파일의 auth_token/ct0로 Twitter 인증 유효성을 확인한다.
+    """쿠키 파일의 auth_token/ct0로 X 인증 유효성을 확인한다.
 
-    Twitter API verify_credentials 엔드포인트를 호출하여 쿠키 만료 여부를 판단한다.
+    X API verify_credentials 엔드포인트를 호출하여 쿠키 만료 여부를 판단한다.
 
     Args:
         cookie_file: Netscape 형식 쿠키 파일 경로.
@@ -563,7 +563,7 @@ async def verify_cookie(cookie_file: str) -> dict:
                 return {
                     "valid": False,
                     "checked_at": checked_at,
-                    "reason": f"Twitter API 응답 오류 (HTTP {resp.status_code})",
+                    "reason": f"X API 응답 오류 (HTTP {resp.status_code})",
                 }
     except httpx.RequestError as e:
         return {

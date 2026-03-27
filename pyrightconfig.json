@@ -6,5 +6,16 @@
       "root": "backend",
       "extraPaths": ["backend"]
     }
+  ],
+  "exclude": [
+    "**/node_modules",
+    "**/__pycache__",
+    "frontend",
+    ".git",
+    "docs"
+  ],
+  "ignore": [
+    "**/node_modules",
+    "frontend"
   ]
 }

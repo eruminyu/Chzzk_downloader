@@ -42,7 +42,7 @@ class GeneralSettingsUpdateRequest(BaseModel):
 
     download_dir: Optional[str] = Field(None, description="녹화 저장 경로")
     monitor_interval: Optional[int] = Field(None, ge=5, le=300, description="감시 주기 (초)")
-    output_format: Optional[str] = Field(None, description="녹화 출력 포맷 (ts, mp4, mkv)")
+    live_format: Optional[str] = Field(None, description="라이브 녹화 포맷 (ts, mkv, mp4)")
     recording_quality: Optional[str] = Field(None, description="녹화 품질 (best, 1080p, 720p, 480p)")
     split_download_dirs: Optional[bool] = Field(None, description="분할 저장 경로 사용 여부")
     vod_chzzk_dir: Optional[str] = Field(None, description="치지직 VOD/클립 저장 경로 (빈 문자열=기본 경로 사용)")
@@ -55,6 +55,7 @@ class VodSettingsUpdateRequest(BaseModel):
     vod_max_concurrent: Optional[int] = Field(None, ge=1, le=10, description="동시 다운로드 최대 개수")
     vod_default_quality: Optional[str] = Field(None, description="기본 화질 (best, 1080p, 720p, 480p)")
     vod_max_speed: Optional[int] = Field(None, ge=0, le=1000, description="최대 다운로드 속도 (MB/s, 0=무제한)")
+    vod_format: Optional[str] = Field(None, description="VOD 다운로드 포맷 (mp4, mkv, ts)")
 
 
 class ChatSettingsUpdateRequest(BaseModel):
@@ -92,7 +93,8 @@ async def get_current_settings():
         "discord_bot_configured": bool(settings.discord_bot_token),
         "keep_download_parts": settings.keep_download_parts,
         "max_record_retries": settings.max_record_retries,
-        "output_format": settings.output_format,
+        "live_format": settings.live_format,
+        "vod_format": settings.vod_format,
         "recording_quality": settings.recording_quality,
         # VOD 설정
         "vod_max_concurrent": settings.vod_max_concurrent,
@@ -109,9 +111,9 @@ async def get_current_settings():
         # TwitCasting 인증 (설정 여부만 — 실제 값은 노출 안 함)
         "twitcasting_client_id": "***" if settings.twitcasting_client_id else None,
         "twitcasting_client_secret": None,
-        # Twitter Spaces 인증 (설정 여부만)
-        "twitter_bearer_token": "***" if settings.twitter_bearer_token else None,
-        "twitter_cookie_file": settings.twitter_cookie_file,
+        # X Spaces 인증 (설정 여부만)
+        "x_bearer_token": "***" if settings.x_bearer_token else None,
+        "x_cookie_file": settings.x_cookie_file,
     }
 
 
@@ -163,16 +165,16 @@ async def update_general_settings(req: GeneralSettingsUpdateRequest):
         settings.monitor_interval = req.monitor_interval
         env_updates["MONITOR_INTERVAL"] = str(req.monitor_interval)
 
-    # ── output_format ──
-    if req.output_format is not None:
-        fmt = req.output_format.lower()
+    # ── live_format ──
+    if req.live_format is not None:
+        fmt = req.live_format.lower()
         if fmt not in VALID_FORMATS:
             raise HTTPException(
                 status_code=400,
                 detail=f"지원하지 않는 포맷입니다. 사용 가능: {', '.join(VALID_FORMATS)}",
             )
-        settings.output_format = fmt
-        env_updates["OUTPUT_FORMAT"] = fmt
+        settings.live_format = fmt
+        env_updates["LIVE_FORMAT"] = fmt
 
     # ── recording_quality ──
     if req.recording_quality is not None:
@@ -228,7 +230,7 @@ async def update_general_settings(req: GeneralSettingsUpdateRequest):
         "settings": {
             "download_dir": settings.download_dir,
             "monitor_interval": settings.monitor_interval,
-            "output_format": settings.output_format,
+            "live_format": settings.live_format,
             "recording_quality": settings.recording_quality,
             "split_download_dirs": settings.split_download_dirs,
             "vod_chzzk_dir": settings.vod_chzzk_dir,
@@ -324,6 +326,17 @@ async def update_vod_settings(req: VodSettingsUpdateRequest):
         settings.vod_max_speed = req.vod_max_speed
         env_updates["VOD_MAX_SPEED"] = str(req.vod_max_speed)
 
+    # ── vod_format ──
+    if req.vod_format is not None:
+        fmt = req.vod_format.lower()
+        if fmt not in VALID_FORMATS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"지원하지 않는 포맷입니다. 사용 가능: {', '.join(VALID_FORMATS)}",
+            )
+        settings.vod_format = fmt
+        env_updates["VOD_FORMAT"] = fmt
+
     # .env 영구 저장
     if env_updates:
         try:
@@ -339,6 +352,7 @@ async def update_vod_settings(req: VodSettingsUpdateRequest):
             "vod_max_concurrent": settings.vod_max_concurrent,
             "vod_default_quality": settings.vod_default_quality,
             "vod_max_speed": settings.vod_max_speed,
+            "vod_format": settings.vod_format,
         },
     }
 
@@ -465,9 +479,9 @@ async def get_auth_status():
     return service.get_auth_status()
 
 
-@router.get("/cookie-status", summary="Twitter 쿠키 유효성 상태 조회")
+@router.get("/cookie-status", summary="X 쿠키 유효성 상태 조회")
 async def get_cookie_status():
-    """Twitter Spaces 쿠키의 유효성 상태를 반환합니다.
+    """X Spaces 쿠키의 유효성 상태를 반환합니다.
 
     쿠키는 하루 1회 자동 검증되며, 이 엔드포인트는 가장 최근 검증 결과를 반환합니다.
     프론트엔드 Settings 페이지 만료 배너에 사용됩니다.
@@ -476,15 +490,15 @@ async def get_cookie_status():
 
     service = get_recorder_service()
     conductor = service._conductor
-    return {"twitter": conductor.get_cookie_status()}
+    return {"x": conductor.get_cookie_status()}
 
 
-@router.post("/cookie-status/check", summary="Twitter 쿠키 즉시 검증")
+@router.post("/cookie-status/check", summary="X 쿠키 즉시 검증")
 async def check_cookie_now():
-    """Twitter Spaces 쿠키를 즉시 검증합니다 (24시간 주기 무시)."""
+    """X Spaces 쿠키를 즉시 검증합니다 (24시간 주기 무시)."""
     from app.main import get_recorder_service
 
     service = get_recorder_service()
     conductor = service._conductor
-    await conductor._check_twitter_cookie()
-    return {"twitter": conductor.get_cookie_status()}
+    await conductor._check_x_cookie()
+    return {"x": conductor.get_cookie_status()}

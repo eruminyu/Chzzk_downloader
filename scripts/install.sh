@@ -95,21 +95,64 @@ install_dependencies() {
   fi
   info "curl ✓"
 
-  # ffmpeg
-  if ! command -v ffmpeg &>/dev/null; then
-    info "ffmpeg 설치 중..."
-    if [ "$PKG_MANAGER" = "apt" ]; then
-      sudo apt-get update -qq
-      pkg_install ffmpeg
-    elif [ "$PKG_MANAGER" = "dnf" ] || [ "$PKG_MANAGER" = "yum" ]; then
-      # RHEL 계열은 RPM Fusion이 필요할 수 있음
-      sudo "$PKG_MANAGER" install -y epel-release 2>/dev/null || true
-      pkg_install ffmpeg
-    else
-      pkg_install ffmpeg
-    fi
+  # ffmpeg 설치 — 최신 정적 빌드 권장 (BtbN/FFmpeg-Builds)
+  # apt 기본 버전(6.x)도 동작하나, 7.1.1+ 에서 Chzzk CDN .m4v 확장자 문제가
+  # 자동으로 처리됩니다. 가능하면 최신 빌드를 권장합니다.
+  _install_ffmpeg_static() {
+    local arch pattern
+    arch=$(uname -m)
+    case "$arch" in
+      x86_64)  pattern="linux64-gpl.tar.xz" ;;
+      aarch64) pattern="linuxarm64-gpl.tar.xz" ;;
+      *)       error "지원하지 않는 CPU 아키텍처: $arch (x86_64/aarch64 만 지원)" ;;
+    esac
+
+    info "BtbN/FFmpeg-Builds 최신 릴리즈 조회 중..."
+    local url
+    url=$(curl -fsSL "https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest" \
+      | grep "browser_download_url" \
+      | grep "$pattern" \
+      | grep -v "shared" \
+      | cut -d'"' -f4 \
+      | head -1)
+    [ -z "$url" ] && error "ffmpeg 다운로드 URL 조회 실패.\n  수동: https://github.com/BtbN/FFmpeg-Builds/releases"
+
+    local tmpdir
+    tmpdir=$(mktemp -d)
+    trap "rm -rf '$tmpdir'" EXIT
+
+    info "ffmpeg 정적 빌드 다운로드 중 ($arch)..."
+    curl -fsSL --retry 3 -L -o "$tmpdir/ffmpeg.tar.xz" "$url" \
+      || error "ffmpeg 다운로드 실패."
+
+    info "압축 해제 중..."
+    tar xf "$tmpdir/ffmpeg.tar.xz" -C "$tmpdir"
+
+    local ffmpeg_bin ffprobe_bin
+    ffmpeg_bin=$(find "$tmpdir" -type f -name "ffmpeg" | head -1)
+    ffprobe_bin=$(find "$tmpdir" -type f -name "ffprobe" | head -1)
+    [ -z "$ffmpeg_bin" ] && error "ffmpeg 압축 해제 실패."
+
+    sudo install -m 755 "$ffmpeg_bin" /usr/local/bin/ffmpeg
+    [ -n "$ffprobe_bin" ] && sudo install -m 755 "$ffprobe_bin" /usr/local/bin/ffprobe
+    trap - EXIT
+    rm -rf "$tmpdir"
+  }
+
+  # 항상 정적 빌드 설치 (패키지 매니저 버전 무시)
+  _install_ffmpeg_static
+
+  # 최소 버전 검증: ffmpeg 6.0+ 필수 (7.1.1+ 권장)
+  # BtbN 빌드는 "version n8.0", apt는 "version 6.1.1" 형태 → n/N 접두사 처리
+  _FFMPEG_VER=$(ffmpeg -version 2>&1 | head -1 | awk '{print $3}')
+  _FFMPEG_MAJOR=$(echo "$_FFMPEG_VER" | sed 's/^[nN]//' | cut -d. -f1)
+  if [ -z "$_FFMPEG_MAJOR" ] || ! [ "$_FFMPEG_MAJOR" -eq "$_FFMPEG_MAJOR" ] 2>/dev/null || [ "$_FFMPEG_MAJOR" -lt 6 ]; then
+    error "ffmpeg 6.0 이상이 필요합니다 (현재: ${_FFMPEG_VER:-알 수 없음}).\n  7.1.1+ 또는 최신 정적 빌드를 권장합니다.\n  https://github.com/BtbN/FFmpeg-Builds/releases"
   fi
-  info "ffmpeg $(ffmpeg -version 2>&1 | head -1 | awk '{print $3}') ✓"
+  if [ "$_FFMPEG_MAJOR" -lt 7 ]; then
+    warn "ffmpeg ${_FFMPEG_VER} 감지 — 7.1.1+ 권장. Chzzk CDN 호환성 자동 적용."
+  fi
+  info "ffmpeg ${_FFMPEG_VER} ✓"
 
   # Python 3.10+
   PYTHON_CMD=""
@@ -182,7 +225,7 @@ clone_repo() {
   if [ -d "$INSTALL_DIR/.git" ]; then
     warn "이미 설치된 저장소가 있습니다: $INSTALL_DIR"
     warn "최신 버전으로 업데이트합니다..."
-    git -C "$INSTALL_DIR" pull --ff-only
+    git -C "$INSTALL_DIR" fetch origin && git -C "$INSTALL_DIR" reset --hard origin/main
   else
     info "저장소를 $INSTALL_DIR 에 클론 중..."
     git clone "$REPO_URL" "$INSTALL_DIR"
@@ -218,10 +261,6 @@ setup_python() {
 
   info "Python 의존성 설치 중..."
   "$VENV_DIR/bin/pip" install -r "$INSTALL_DIR/backend/requirements.txt" -q
-
-  # streamlink (pip으로 설치)
-  info "streamlink 설치 중..."
-  "$VENV_DIR/bin/pip" install streamlink -q
   info "Python 의존성 설치 완료 ✓"
 }
 
@@ -257,8 +296,19 @@ install_service() {
     return 0
   fi
 
+  # 이미 서비스가 등록되어 있으면 재등록 질문 없이 자동 재시작
+  if systemctl is-active --quiet chzzk-recorder 2>/dev/null; then
+    info "기존 서비스 감지 — 업데이트 후 자동 재시작합니다."
+    sudo systemctl daemon-reload
+    sudo systemctl restart chzzk-recorder
+    SERVICE_REGISTERED=true
+    info "서비스 재시작 완료 ✓"
+    info "서비스 상태: sudo systemctl status chzzk-recorder"
+    return 0
+  fi
+
   echo ""
-  # curl | bash 파이프 환경에서는 stdin을 /dev/tty로 강제 연결
+  # 신규 설치: curl | bash 파이프 환경에서는 stdin을 /dev/tty로 강제 연결
   read -rp "$(echo -e "${YELLOW}[?]${NC} systemd 서비스로 등록하시겠습니까? (부팅 시 자동 실행) [y/N]: ")" REPLY </dev/tty
   if [[ "$REPLY" =~ ^[Yy]$ ]]; then
     SERVICE_FILE="/etc/systemd/system/chzzk-recorder.service"

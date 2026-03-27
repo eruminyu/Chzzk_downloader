@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { useBlocker } from "react-router-dom";
 import {
     Settings as SettingsIcon,
     Shield,
@@ -22,9 +23,14 @@ import {
     ChevronRight,
     X,
     Info,
+    AlertCircle,
+    Upload,
+    Trash2,
+    CheckCircle2,
 } from "lucide-react";
 import { api, Settings as SettingsType, BrowseDirsResponse, DirEntry } from "../api/client";
 import { useToast } from "../components/ui/Toast";
+import { useConfirm } from "../components/ui/ConfirmModal";
 import { getErrorMessage } from "../utils/error";
 import { DirInput } from "../components/ui/DirInput";
 import { useTheme, THEMES, ThemeId } from "../context/ThemeContext";
@@ -107,20 +113,46 @@ export default function Settings() {
     const [isDocker, setIsDocker] = useState(false);
     const [activeTab, setActiveTab] = useState<TabId>("general");
     const toast = useToast();
+    const confirm = useConfirm();
 
     // ── Auth state ──
     const [nidAut, setNidAut] = useState("");
     const [nidSes, setNidSes] = useState("");
+    const [cookieStatus, setCookieStatus] = useState<"valid" | "invalid" | "checking" | "unknown">("unknown");
+    const [nickname, setNickname] = useState<string | null>(null);
+
+    const checkCookieStatus = async () => {
+        setCookieStatus("checking");
+        try {
+            const res = await api.testCookies();
+            if (res.valid) {
+                setCookieStatus("valid");
+                setNickname(res.user_status?.nickname || null);
+            } else {
+                setCookieStatus("invalid");
+            }
+        } catch {
+            setCookieStatus("invalid");
+        }
+    };
+
+    useEffect(() => {
+        if (activeTab === "auth" && cookieStatus === "unknown") {
+            checkCookieStatus();
+        }
+    }, [activeTab]);
 
     // ── TwitCasting auth state ──
     const [twitcastingClientId, setTwitcastingClientId] = useState("");
     const [twitcastingClientSecret, setTwitcastingClientSecret] = useState("");
     const [twitcastingSaving, setTwitcastingSaving] = useState(false);
 
-    // ── Twitter Spaces auth state ──
-    const [twitterBearerToken, setTwitterBearerToken] = useState("");
-    const [twitterCookieFile, setTwitterCookieFile] = useState("");
-    const [twitterSaving, setTwitterSaving] = useState(false);
+    // ── X Spaces auth state ──
+    const [xBearerToken, setXBearerToken] = useState("");
+    const [xCookieFileSet, setXCookieFileSet] = useState(false);
+    const [xSaving, setXSaving] = useState(false);
+    const [xCookieUploading, setXCookieUploading] = useState(false);
+    const cookieFileInputRef = useRef<HTMLInputElement>(null);
 
     // ── Download state ──
     const [keepParts, setKeepParts] = useState(false);
@@ -130,7 +162,8 @@ export default function Settings() {
     // ── General state ──
     const [downloadDir, setDownloadDir] = useState("");
     const [monitorInterval, setMonitorInterval] = useState(30);
-    const [outputFormat, setOutputFormat] = useState("ts");
+    const [liveFormat, setLiveFormat] = useState("ts");
+    const [vodFormat, setVodFormat] = useState("mp4");
     const [recordingQuality, setRecordingQuality] = useState("best");
     const [splitDownloadDirs, setSplitDownloadDirs] = useState(false);
     const [vodChzzkDir, setVodChzzkDir] = useState("");
@@ -158,6 +191,84 @@ export default function Settings() {
     const iconInputRef = useRef<HTMLInputElement>(null);
     const colorPickerRef = useRef<HTMLInputElement>(null);
 
+    const isTabDirty = (tabId: TabId) => {
+        if (!settings) return false;
+        switch (tabId) {
+            case "general":
+                return downloadDir !== settings.download_dir ||
+                       monitorInterval !== settings.monitor_interval ||
+                       liveFormat !== (settings.live_format || "ts") ||
+                       recordingQuality !== (settings.recording_quality || "best") ||
+                       splitDownloadDirs !== (settings.split_download_dirs ?? false) ||
+                       vodChzzkDir !== (settings.vod_chzzk_dir ?? "") ||
+                       vodExternalDir !== (settings.vod_external_dir ?? "");
+            case "download":
+                return keepParts !== settings.keep_download_parts ||
+                       maxRetries !== settings.max_record_retries ||
+                       vodMaxConcurrent !== settings.vod_max_concurrent ||
+                       vodDefaultQuality !== settings.vod_default_quality ||
+                       vodMaxSpeed !== settings.vod_max_speed ||
+                       vodFormat !== (settings.vod_format || "mp4");
+            case "auth":
+                return (twitcastingClientId !== "" || twitcastingClientSecret !== "") ||
+                       xBearerToken !== "" ||
+                       (nidAut !== "" || nidSes !== "");
+            case "notifications":
+                return chatArchiveEnabled !== settings.chat_archive_enabled ||
+                       discordChannelId !== (settings.discord_notification_channel_id || "");
+            case "appearance":
+                return titleInput !== pageTitle;
+            default:
+                return false;
+        }
+    };
+
+    const handleTabChange = async (newTab: TabId) => {
+        if (activeTab === newTab) return;
+        if (isTabDirty(activeTab)) {
+            const ok = await confirm({
+                title: "저장되지 않은 변경사항",
+                message: "현재 탭에 저장하지 않은 설정이 있습니다. 이동하시겠습니까?\n이동하면 변경사항은 초기화됩니다.",
+                confirmText: "이동",
+                variant: "danger"
+            });
+            if (!ok) return;
+            
+            if (activeTab === "auth") {
+                setTwitcastingClientId("");
+                setTwitcastingClientSecret("");
+                setXBearerToken("");
+                setNidAut("");
+                setNidSes("");
+            } else if (activeTab === "appearance") {
+                setTitleInput(pageTitle);
+            } else {
+                loadSettings();
+            }
+        }
+        setActiveTab(newTab);
+    };
+
+    // ── 페이지 이탈 경고 (Bug 2: 사이드바 이탈) ──
+    const blocker = useBlocker(
+        ({ currentLocation, nextLocation }) =>
+            currentLocation.pathname !== nextLocation.pathname &&
+            TABS.some((t) => isTabDirty(t.id))
+    );
+
+    useEffect(() => {
+        if (blocker.state !== "blocked") return;
+        confirm({
+            title: "저장되지 않은 변경사항",
+            message: "저장하지 않은 설정이 있습니다. 페이지를 이동하시겠습니까?\n이동하면 변경사항은 초기화됩니다.",
+            confirmText: "이동",
+            variant: "danger",
+        }).then((ok) => {
+            if (ok) blocker.proceed();
+            else blocker.reset();
+        });
+    }, [blocker.state]);
+
     useEffect(() => {
         loadSettings();
         fetch("/api/setup/status")
@@ -168,13 +279,18 @@ export default function Settings() {
 
     const loadSettings = async () => {
         try {
-            const data = await api.getSettings();
+            const [data, platformStatus] = await Promise.all([
+                api.getSettings(),
+                api.getPlatformStatus(),
+            ]);
+            setXCookieFileSet(platformStatus.x_spaces.cookie_file_set);
             setSettings(data);
             setKeepParts(data.keep_download_parts);
             setMaxRetries(data.max_record_retries);
             setDownloadDir(data.download_dir);
             setMonitorInterval(data.monitor_interval);
-            setOutputFormat(data.output_format || "ts");
+            setLiveFormat(data.live_format || "ts");
+            setVodFormat(data.vod_format || "mp4");
             setRecordingQuality(data.recording_quality || "best");
             setVodMaxConcurrent(data.vod_max_concurrent);
             setVodDefaultQuality(data.vod_default_quality);
@@ -206,11 +322,15 @@ export default function Settings() {
         try {
             const res = await api.testCookies();
             if (res.valid) {
+                setCookieStatus("valid");
+                setNickname(res.user_status?.nickname || null);
                 toast.success(`인증 성공! 닉네임: ${res.user_status?.nickname || "User"}`);
             } else {
+                setCookieStatus("invalid");
                 toast.error("쿠키가 유효하지 않습니다.");
             }
         } catch (e: unknown) {
+            setCookieStatus("invalid");
             toast.error(getErrorMessage(e, "검증에 실패했습니다."));
         }
     };
@@ -236,23 +356,53 @@ export default function Settings() {
         }
     };
 
-    const handleSaveTwitter = async () => {
-        if (!twitterBearerToken) {
+    const handleSaveX = async () => {
+        if (!xBearerToken) {
             toast.error("Bearer Token을 입력하세요.");
             return;
         }
-        setTwitterSaving(true);
+        setXSaving(true);
         try {
-            await api.updateTwitterSettings({
-                bearer_token: twitterBearerToken,
-                cookie_file: twitterCookieFile || undefined,
-            });
-            toast.success("Twitter Spaces 인증 설정이 저장되었습니다.");
-            setTwitterBearerToken("");
+            await api.updateXSettings({ bearer_token: xBearerToken });
+            toast.success("X Spaces 인증 설정이 저장되었습니다.");
+            setXBearerToken("");
         } catch (e: unknown) {
-            toast.error(getErrorMessage(e, "Twitter 설정 저장에 실패했습니다."));
+            toast.error(getErrorMessage(e, "X 설정 저장에 실패했습니다."));
         } finally {
-            setTwitterSaving(false);
+            setXSaving(false);
+        }
+    };
+
+    const handleUploadXCookie = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        setXCookieUploading(true);
+        try {
+            await api.uploadXCookie(file);
+            setXCookieFileSet(true);
+            toast.success("쿠키 파일이 업로드되었습니다.");
+        } catch (err: unknown) {
+            toast.error(getErrorMessage(err, "쿠키 파일 업로드에 실패했습니다."));
+        } finally {
+            setXCookieUploading(false);
+            if (cookieFileInputRef.current) cookieFileInputRef.current.value = "";
+        }
+    };
+
+    const handleDeleteXCookie = async () => {
+        const ok = await confirm({
+            title: "쿠키 파일 삭제",
+            message: "저장된 X 쿠키 파일을 삭제하시겠습니까?",
+            confirmText: "삭제",
+            variant: "danger",
+        });
+        if (!ok) return;
+        try {
+            await api.deleteXCookie();
+            setXCookieFileSet(false);
+            toast.success("쿠키 파일이 삭제되었습니다.");
+        } catch (err: unknown) {
+            toast.error(getErrorMessage(err, "쿠키 파일 삭제에 실패했습니다."));
         }
     };
 
@@ -277,7 +427,7 @@ export default function Settings() {
             await api.updateGeneralSettings({
                 download_dir: downloadDir,
                 monitor_interval: monitorInterval,
-                output_format: outputFormat,
+                live_format: liveFormat,
                 recording_quality: recordingQuality,
                 split_download_dirs: splitDownloadDirs,
                 vod_chzzk_dir: vodChzzkDir,
@@ -300,6 +450,7 @@ export default function Settings() {
                 vod_max_concurrent: vodMaxConcurrent,
                 vod_default_quality: vodDefaultQuality,
                 vod_max_speed: vodMaxSpeed,
+                vod_format: vodFormat,
             });
             toast.success("VOD 설정이 저장되었습니다.");
             loadSettings();
@@ -360,8 +511,8 @@ export default function Settings() {
                 {TABS.map((tab) => (
                     <button
                         key={tab.id}
-                        onClick={() => setActiveTab(tab.id)}
-                        className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium whitespace-nowrap transition-colors border-b-2 -mb-px ${
+                        onClick={() => handleTabChange(tab.id)}
+                        className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium whitespace-nowrap transition-colors border-b-2 -mb-px relative ${
                             activeTab === tab.id
                                 ? "border-green-500 text-green-400"
                                 : "border-transparent text-zinc-500 hover:text-zinc-300"
@@ -369,6 +520,9 @@ export default function Settings() {
                     >
                         <span>{tab.icon}</span>
                         {tab.label}
+                        {isTabDirty(tab.id) && (
+                            <span className="w-2 h-2 rounded-full bg-orange-500 absolute top-2 right-2 animate-pulse" />
+                        )}
                     </button>
                 ))}
             </div>
@@ -492,19 +646,19 @@ export default function Settings() {
                         <div className="space-y-2">
                             <label className="text-sm font-medium text-zinc-300 flex items-center gap-2">
                                 <Film className="w-4 h-4" />
-                                녹화 포맷
+                                라이브 녹화 포맷
                             </label>
                             <Select
-                                value={outputFormat}
-                                onChange={setOutputFormat}
+                                value={liveFormat}
+                                onChange={setLiveFormat}
                                 options={[
-                                    { value: "ts", label: "TS (MPEG Transport Stream)" },
-                                    { value: "mp4", label: "MP4 (권장 — 범용)" },
-                                    { value: "mkv", label: "MKV (Matroska)" },
+                                    { value: "ts", label: "TS — MPEG Transport Stream (권장)" },
+                                    { value: "mkv", label: "MKV — Matroska" },
+                                    { value: "mp4", label: "MP4 (권장하지 않음 — 라이브 중단 시 파일 손상 가능)" },
                                 ]}
                             />
                             <p className="text-xs text-zinc-500">
-                                TS는 중단 시에도 파일이 유지되며, MP4/MKV는 호환성이 좋습니다.
+                                TS/MKV는 스트리밍에 최적화된 컨테이너로 녹화 중단 시에도 파일이 유지됩니다. MP4는 라이브 녹화에 적합하지 않습니다.
                             </p>
                         </div>
 
@@ -524,7 +678,7 @@ export default function Settings() {
                                     { value: "480p", label: "480p" },
                                 ]}
                             />
-                            <p className="text-xs text-zinc-500">Streamlink이 지원하는 화질 중 선택됩니다.</p>
+                            <p className="text-xs text-zinc-500">yt-dlp가 지원하는 화질 중 선택됩니다.</p>
                         </div>
 
                         <button
@@ -598,6 +752,26 @@ export default function Settings() {
                                     />
                                     <p className="text-xs text-zinc-500">0 = 무제한, 네트워크 대역폭 제한 시 사용</p>
                                 </div>
+
+                                {/* VOD 다운로드 포맷 */}
+                                <div className="space-y-2">
+                                    <label className="text-sm font-medium text-zinc-300 flex items-center gap-2">
+                                        <Film className="w-4 h-4" />
+                                        VOD 다운로드 포맷
+                                    </label>
+                                    <Select
+                                        value={vodFormat}
+                                        onChange={setVodFormat}
+                                        options={[
+                                            { value: "mp4", label: "MP4 — MPEG-4 (권장)" },
+                                            { value: "mkv", label: "MKV — Matroska" },
+                                            { value: "ts", label: "TS — MPEG Transport Stream" },
+                                        ]}
+                                    />
+                                    <p className="text-xs text-zinc-500">
+                                        VOD/클립은 MP4가 가장 호환성이 좋습니다. 오디오·비디오 병합이 필요한 경우 ffmpeg를 사용합니다.
+                                    </p>
+                                </div>
                             </div>
 
                             <button
@@ -635,7 +809,7 @@ export default function Settings() {
                             </div>
 
                             <div>
-                                <label className="block text-sm font-medium text-zinc-300 mb-2 flex items-center gap-2">
+                                <label className="flex text-sm font-medium text-zinc-300 mb-2 items-center gap-2">
                                     <RefreshCcw className="w-4 h-4" />
                                     자동 재시도 횟수
                                 </label>
@@ -703,13 +877,25 @@ export default function Settings() {
                                     <span className="w-3 h-3 rounded-full bg-purple-400 inline-block" />
                                     치지직 (Chzzk)
                                 </h3>
-                                <span className={`px-2 py-1 rounded text-xs font-bold ${
-                                    settings?.authenticated
-                                        ? "bg-green-500/20 text-green-400"
-                                        : "bg-red-500/20 text-red-400"
-                                }`}>
-                                    {settings?.authenticated ? "AUTHENTICATED" : "GUEST MODE"}
-                                </span>
+                                <div className="flex items-center gap-2">
+                                    {cookieStatus === "checking" ? (
+                                        <span className="px-2 py-1 rounded text-xs font-bold bg-zinc-800 text-zinc-400 flex items-center gap-1">
+                                            <Loader2 className="w-3 h-3 animate-spin" /> CHECKING...
+                                        </span>
+                                    ) : cookieStatus === "valid" ? (
+                                        <span className="px-2 py-1 rounded text-xs font-bold bg-green-500/20 text-green-400 flex items-center gap-1">
+                                            <Shield className="w-3 h-3" /> 유효함 {nickname && `(${nickname})`}
+                                        </span>
+                                    ) : cookieStatus === "invalid" ? (
+                                        <span className="px-2 py-1 rounded text-xs font-bold bg-red-500/20 text-red-400 flex items-center gap-1">
+                                            <AlertCircle className="w-3 h-3" /> 만료/미설정
+                                        </span>
+                                    ) : (
+                                        <button onClick={checkCookieStatus} className="px-2 py-1 rounded text-xs font-bold bg-zinc-800 text-zinc-400 hover:text-white transition-colors">
+                                            상태 확인
+                                        </button>
+                                    )}
+                                </div>
                             </div>
 
                             <div className="space-y-4">
@@ -803,21 +989,21 @@ export default function Settings() {
                             </button>
                         </div>
 
-                        {/* ── Twitter Spaces 인증 ── */}
+                        {/* ── X Spaces 인증 ── */}
                         <div className="bg-zinc-900/50 p-6 rounded-xl border border-zinc-800 space-y-5">
                             <h3 className="text-lg font-semibold text-white flex items-center gap-2">
                                 <span className="w-3 h-3 rounded-full bg-cyan-400 inline-block" />
-                                Twitter Spaces
+                                X Spaces
                             </h3>
                             <p className="text-xs text-zinc-500">
-                                Twitter API v2 Bearer Token 및 쿠키 파일 설정입니다.{" "}
+                                X API v2 Bearer Token 및 쿠키 파일 설정입니다.{" "}
                                 <a
-                                    href="https://developer.twitter.com/en/portal/dashboard"
+                                    href="https://developer.x.com/en/portal/dashboard"
                                     target="_blank"
                                     rel="noopener noreferrer"
                                     className="text-cyan-400 hover:underline"
                                 >
-                                    developer.twitter.com
+                                    developer.x.com
                                 </a>
                                 {" "}에서 앱 생성 후 Bearer Token을 발급받으세요.
                             </p>
@@ -828,23 +1014,53 @@ export default function Settings() {
                                     <input
                                         type="password"
                                         className="w-full bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-cyan-500"
-                                        value={twitterBearerToken}
-                                        onChange={(e) => setTwitterBearerToken(e.target.value)}
-                                        placeholder="Twitter Bearer Token (변경 시에만 입력)..."
+                                        value={xBearerToken}
+                                        onChange={(e) => setXBearerToken(e.target.value)}
+                                        placeholder="X Bearer Token (변경 시에만 입력)..."
                                     />
                                 </div>
                                 <div className="space-y-2">
                                     <label className="text-sm font-medium text-zinc-300">
-                                        쿠키 파일 경로{" "}
+                                        쿠키 파일{" "}
                                         <span className="text-zinc-500 font-normal">(선택 — Netscape 형식)</span>
                                     </label>
-                                    <input
-                                        type="text"
-                                        className="w-full bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-cyan-500 font-mono text-sm"
-                                        value={twitterCookieFile}
-                                        onChange={(e) => setTwitterCookieFile(e.target.value)}
-                                        placeholder="/path/to/twitter_cookies.txt"
-                                    />
+                                    <div className="flex items-center gap-3">
+                                        <div className={`flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border ${xCookieFileSet ? "border-green-700 bg-green-950/40 text-green-400" : "border-zinc-700 bg-zinc-950 text-zinc-500"}`}>
+                                            {xCookieFileSet
+                                                ? <><CheckCircle2 className="w-3.5 h-3.5" /> 업로드됨</>
+                                                : "없음"
+                                            }
+                                        </div>
+                                        <input
+                                            ref={cookieFileInputRef}
+                                            type="file"
+                                            accept=".txt"
+                                            className="hidden"
+                                            onChange={handleUploadXCookie}
+                                        />
+                                        <button
+                                            type="button"
+                                            onClick={() => cookieFileInputRef.current?.click()}
+                                            disabled={xCookieUploading}
+                                            className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-zinc-800 hover:bg-zinc-700 disabled:bg-zinc-800 text-white rounded-lg border border-zinc-700 transition-colors"
+                                        >
+                                            {xCookieUploading
+                                                ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                                : <Upload className="w-3.5 h-3.5" />
+                                            }
+                                            {xCookieUploading ? "업로드 중..." : "파일 선택"}
+                                        </button>
+                                        {xCookieFileSet && (
+                                            <button
+                                                type="button"
+                                                onClick={handleDeleteXCookie}
+                                                className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-zinc-800 hover:bg-red-900/50 text-zinc-400 hover:text-red-400 rounded-lg border border-zinc-700 hover:border-red-800 transition-colors"
+                                            >
+                                                <Trash2 className="w-3.5 h-3.5" />
+                                                삭제
+                                            </button>
+                                        )}
+                                    </div>
                                     <p className="text-xs text-zinc-500">
                                         yt-dlp로 스페이스 녹화 시 사용됩니다. 브라우저 확장(cookies.txt)으로 추출하세요.
                                     </p>
@@ -852,12 +1068,12 @@ export default function Settings() {
                             </div>
 
                             <button
-                                onClick={handleSaveTwitter}
-                                disabled={twitterSaving}
+                                onClick={handleSaveX}
+                                disabled={xSaving}
                                 className="w-full bg-cyan-600 hover:bg-cyan-500 disabled:bg-zinc-700 text-white py-2.5 rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
                             >
-                                {twitterSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                                {twitterSaving ? "저장 중..." : "Twitter Spaces 설정 저장"}
+                                {xSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                                {xSaving ? "저장 중..." : "X Spaces 설정 저장"}
                             </button>
                         </div>
                     </div>
@@ -1073,9 +1289,9 @@ export default function Settings() {
                                 </span>
                             </div>
                             <div className="flex justify-between py-2">
-                                <span className="text-zinc-500">Twitter Spaces 설정</span>
-                                <span className={settings?.twitter_bearer_token ? "text-cyan-400" : "text-zinc-500"}>
-                                    {settings?.twitter_bearer_token ? "설정됨" : "미설정"}
+                                <span className="text-zinc-500">X Spaces 설정</span>
+                                <span className={settings?.x_bearer_token ? "text-cyan-400" : "text-zinc-500"}>
+                                    {settings?.x_bearer_token ? "설정됨" : "미설정"}
                                 </span>
                             </div>
                         </div>

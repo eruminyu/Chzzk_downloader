@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import {
     Download,
     Play,
@@ -27,8 +27,14 @@ export default function VodDownload() {
     const [url, setUrl] = useState("");
     const [loading, setLoading] = useState(false);
     const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+    const [isInitialLoad, setIsInitialLoad] = useState(true);
     const toast = useToast();
     const confirm = useConfirm();
+
+    useEffect(() => {
+        const timer = setTimeout(() => setIsInitialLoad(false), 500);
+        return () => clearTimeout(timer);
+    }, []);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -188,7 +194,20 @@ export default function VodDownload() {
                     )}
                 </div>
 
-                {tasks.length === 0 ? (
+                {isInitialLoad ? (
+                    <div className="space-y-3">
+                        {[1, 2, 3].map(i => (
+                            <div key={i} className="bg-zinc-900/50 border border-zinc-800 p-4 rounded-xl flex items-start gap-4 animate-pulse">
+                                <div className="w-24 h-20 bg-zinc-800/50 rounded-lg shrink-0" />
+                                <div className="flex-1 space-y-3 pt-2">
+                                    <div className="h-4 bg-zinc-800/50 rounded w-1/3" />
+                                    <div className="w-full bg-zinc-800/50 h-2 rounded-full" />
+                                    <div className="h-3 bg-zinc-800/50 rounded w-1/4" />
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                ) : tasks.length === 0 ? (
                     <div className="text-center py-20 bg-zinc-900/30 rounded-xl border border-zinc-800 border-dashed">
                         <FileVideo className="w-16 h-16 text-zinc-700 mx-auto mb-4" />
                         <p className="text-zinc-500 font-medium">활성 다운로드 없음</p>
