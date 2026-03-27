@@ -95,18 +95,49 @@ install_dependencies() {
   fi
   info "curl ✓"
 
-  # ffmpeg
+  # ffmpeg — 패키지 매니저 대신 johnvansickle.com 정적 빌드 사용
+  # 이유: apt/dnf는 OS 버전마다 ffmpeg 버전이 달라 동작이 불일치함.
+  # 정적 빌드는 항상 최신 안정 버전(현재 7.x+)을 OS 무관하게 설치.
+  _install_ffmpeg_static() {
+    local arch
+    arch=$(uname -m)
+    case "$arch" in
+      x86_64)  local dl_arch="amd64" ;;
+      aarch64) local dl_arch="arm64" ;;
+      armv7l)  local dl_arch="armhf" ;;
+      *)       error "지원하지 않는 CPU 아키텍처: $arch (amd64/arm64/armhf 만 지원)" ;;
+    esac
+
+    local url="https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-${dl_arch}-static.tar.xz"
+    local tmpdir
+    tmpdir=$(mktemp -d)
+    trap "rm -rf '$tmpdir'" EXIT
+
+    info "ffmpeg 정적 빌드 다운로드 중 ($dl_arch)..."
+    curl -fsSL --retry 3 -o "$tmpdir/ffmpeg.tar.xz" "$url" \
+      || error "ffmpeg 다운로드 실패. 인터넷 연결을 확인하세요.\n  수동 설치: https://johnvansickle.com/ffmpeg/"
+
+    info "압축 해제 중..."
+    tar xf "$tmpdir/ffmpeg.tar.xz" -C "$tmpdir"
+
+    local ffmpeg_dir
+    ffmpeg_dir=$(find "$tmpdir" -maxdepth 1 -type d -name "ffmpeg-*" | head -1)
+    [ -z "$ffmpeg_dir" ] && error "ffmpeg 압축 해제 실패."
+
+    sudo install -m 755 "$ffmpeg_dir/ffmpeg"  /usr/local/bin/ffmpeg
+    sudo install -m 755 "$ffmpeg_dir/ffprobe" /usr/local/bin/ffprobe
+    trap - EXIT
+    rm -rf "$tmpdir"
+  }
+
   if ! command -v ffmpeg &>/dev/null; then
-    info "ffmpeg 설치 중..."
-    if [ "$PKG_MANAGER" = "apt" ]; then
-      sudo apt-get update -qq
-      pkg_install ffmpeg
-    elif [ "$PKG_MANAGER" = "dnf" ] || [ "$PKG_MANAGER" = "yum" ]; then
-      # RHEL 계열은 RPM Fusion이 필요할 수 있음
-      sudo "$PKG_MANAGER" install -y epel-release 2>/dev/null || true
-      pkg_install ffmpeg
-    else
-      pkg_install ffmpeg
+    _install_ffmpeg_static
+  else
+    # 이미 설치된 경우 버전 확인 (6.x 이하면 업그레이드)
+    _FFMPEG_MAJOR=$(ffmpeg -version 2>&1 | head -1 | grep -oP '(?<=version )\d+' | head -1)
+    if [ -n "$_FFMPEG_MAJOR" ] && [ "$_FFMPEG_MAJOR" -lt 7 ]; then
+      warn "ffmpeg ${_FFMPEG_MAJOR}.x 감지 — Chzzk HLS(.m4v 세그먼트) 호환을 위해 7.x+ 로 업그레이드합니다."
+      _install_ffmpeg_static
     fi
   fi
   info "ffmpeg $(ffmpeg -version 2>&1 | head -1 | awk '{print $3}') ✓"
@@ -218,10 +249,6 @@ setup_python() {
 
   info "Python 의존성 설치 중..."
   "$VENV_DIR/bin/pip" install -r "$INSTALL_DIR/backend/requirements.txt" -q
-
-  # streamlink (pip으로 설치)
-  info "streamlink 설치 중..."
-  "$VENV_DIR/bin/pip" install streamlink -q
   info "Python 의존성 설치 완료 ✓"
 }
 
