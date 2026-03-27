@@ -96,24 +96,33 @@ install_dependencies() {
   info "curl ✓"
 
   # ffmpeg 8.0+ 정적 빌드 설치
-  # 출처: BtbN/FFmpeg-Builds (GitHub) — 버전별 정적 빌드 제공
-  # johnvansickle.com "release"는 아직 7.x 제공 중 (2025-03 기준)
+  # 출처: BtbN/FFmpeg-Builds (GitHub) — GitHub API로 실제 파일명 동적 조회
   _install_ffmpeg_static() {
-    local arch url
+    local arch pattern
     arch=$(uname -m)
     case "$arch" in
-      x86_64)  url="https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.0-latest-linux64-gpl.tar.xz" ;;
-      aarch64) url="https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.0-latest-linuxarm64-gpl.tar.xz" ;;
+      x86_64)  pattern="linux64-gpl.tar.xz" ;;
+      aarch64) pattern="linuxarm64-gpl.tar.xz" ;;
       *)       error "지원하지 않는 CPU 아키텍처: $arch (x86_64/aarch64 만 지원)" ;;
     esac
+
+    info "BtbN/FFmpeg-Builds 최신 릴리즈 조회 중..."
+    local url
+    url=$(curl -fsSL "https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest" \
+      | grep "browser_download_url" \
+      | grep "$pattern" \
+      | grep -v "shared" \
+      | cut -d'"' -f4 \
+      | head -1)
+    [ -z "$url" ] && error "ffmpeg 다운로드 URL 조회 실패.\n  수동: https://github.com/BtbN/FFmpeg-Builds/releases"
 
     local tmpdir
     tmpdir=$(mktemp -d)
     trap "rm -rf '$tmpdir'" EXIT
 
-    info "ffmpeg 8.0 정적 빌드 다운로드 중 ($arch)..."
+    info "ffmpeg 정적 빌드 다운로드 중 ($arch)..."
     curl -fsSL --retry 3 -L -o "$tmpdir/ffmpeg.tar.xz" "$url" \
-      || error "ffmpeg 다운로드 실패. 인터넷 연결을 확인하세요.\n  수동: https://github.com/BtbN/FFmpeg-Builds/releases"
+      || error "ffmpeg 다운로드 실패."
 
     info "압축 해제 중..."
     tar xf "$tmpdir/ffmpeg.tar.xz" -C "$tmpdir"
