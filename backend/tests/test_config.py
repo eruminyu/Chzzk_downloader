@@ -16,8 +16,9 @@ class TestSettings:
         """기본값이 올바르게 설정되는지 확인"""
         # 환경변수 초기화로 .env 오버라이드 방지
         for key in ["APP_NAME", "DEBUG", "DOWNLOAD_DIR", "HOST", "PORT", "MONITOR_INTERVAL",
-                    "KEEP_DOWNLOAD_PARTS", "MAX_RECORD_RETRIES", "OUTPUT_FORMAT", "RECORDING_QUALITY",
-                    "VOD_MAX_CONCURRENT", "VOD_DEFAULT_QUALITY", "VOD_MAX_SPEED", "CHAT_ARCHIVE_ENABLED"]:
+                    "KEEP_DOWNLOAD_PARTS", "MAX_RECORD_RETRIES", "LIVE_FORMAT", "VOD_FORMAT",
+                    "RECORDING_QUALITY", "VOD_MAX_CONCURRENT", "VOD_DEFAULT_QUALITY",
+                    "VOD_MAX_SPEED", "CHAT_ARCHIVE_ENABLED"]:
             monkeypatch.delenv(key, raising=False)
 
         settings = Settings()
@@ -31,7 +32,8 @@ class TestSettings:
         assert isinstance(settings.monitor_interval, int)
         assert isinstance(settings.keep_download_parts, bool)
         assert isinstance(settings.max_record_retries, int)
-        assert isinstance(settings.output_format, str)
+        assert isinstance(settings.live_format, str)
+        assert isinstance(settings.vod_format, str)
         assert isinstance(settings.recording_quality, str)
         assert isinstance(settings.vod_max_concurrent, int)
         assert isinstance(settings.vod_default_quality, str)

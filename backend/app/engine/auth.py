@@ -81,6 +81,18 @@ class AuthManager:
             return cookies.to_cookie_string()
         return None
 
+    def get_streamlink_options(self) -> dict:
+        """Streamlink 세션 옵션 딕셔너리 반환.
+
+        Streamlink session.set_option(key, value) 형식으로 사용한다.
+        쿠키가 설정된 경우 http-cookies 옵션으로 주입한다.
+        """
+        options: dict = {}
+        cookies = self.get_cookies()
+        if cookies:
+            options["http-cookies"] = cookies.to_dict()
+        return options
+
     def update_cookies(self, nid_aut: str, nid_ses: str) -> None:
         """런타임 및 파일에 쿠키를 갱신한다."""
         self._nid_aut = nid_aut

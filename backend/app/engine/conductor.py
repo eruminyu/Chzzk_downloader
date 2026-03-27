@@ -19,7 +19,7 @@ from app.engine.auth import AuthManager
 from app.engine.base import Platform
 from app.engine.chat import ChatArchiver
 from app.engine.downloader import ChzzkLiveEngine
-from app.engine.pipeline import YtdlpLivePipeline, RecordingState
+from app.engine.pipeline import FFmpegPipeline, RecordingState
 
 if TYPE_CHECKING:
     from app.services.discord_bot import DiscordBotService
@@ -34,7 +34,7 @@ class ChannelTask:
     channel_id: str
     platform: Platform = Platform.CHZZK
     auto_record: bool = True
-    pipeline: Optional[YtdlpLivePipeline] = field(default=None, repr=False)
+    pipeline: Optional[FFmpegPipeline] = field(default=None, repr=False)
     chat_archiver: Optional[ChatArchiver] = field(default=None, repr=False)
     monitor_task: Optional[asyncio.Task] = field(default=None, repr=False)
     is_live: bool = False
@@ -757,21 +757,19 @@ class Conductor:
             settings = get_settings()
             quality = settings.recording_quality or "best"
             engine = self._get_engine(task.platform)
-            live_url = engine.get_stream_url(task.channel_id)
-            cookie_str = self._auth.get_ytdlp_cookies()
 
-            pipeline = YtdlpLivePipeline(channel_id=task.channel_id)
+            # Streamlink Hybrid Pipe 모드: Streamlink Stream 객체를 FFmpegPipeline stdin으로 연결
+            stream_obj = engine.get_stream(task.channel_id, quality=quality)
+
+            pipeline = FFmpegPipeline(channel_id=task.channel_id)
             task.pipeline = pipeline
 
             await pipeline.start_recording(
-                stream_obj=live_url,
+                stream_obj=stream_obj,
                 streamer_name=channel_name or task.channel_name,
                 title=title or task.title,
-                quality=quality,
-                cookie_str=cookie_str,
             )
             logger.info(f"[{composite_key}] 자동 라이브 녹화 시작 (quality={quality}).")
-
             # ── Discord 알림: 녹화 시작 (재시도 시엔 생략) ──
             if self._discord_bot and not is_retry:
                 try:

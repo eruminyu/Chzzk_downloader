@@ -53,9 +53,9 @@ class TestFFmpegPipeline:
         """기본 파일명 정리"""
         pipeline = FFmpegPipeline(channel_id="test_channel")
 
-        # 정상적인 파일명
+        # 정상적인 파일명 (공백 유지)
         result = pipeline._clean_filename("My Stream Title")
-        assert result == "My_Stream_Title"
+        assert result == "My Stream Title"
 
     def test_clean_filename_special_chars(self):
         """특수문자 제거 테스트"""
@@ -81,6 +81,7 @@ class TestFFmpegPipeline:
         result = pipeline._clean_filename("[민성] 2026-02-17 19:30 방송제목")
         assert "민성" in result
         assert "방송제목" in result
+        assert "2026-02-17 19_30" in result  # 콜론만 언더바로 바뀜
         # 콜론은 제거되어야 함
         assert ":" not in result
 
@@ -116,6 +117,7 @@ class TestFFmpegPipeline:
         # [스트리머] 2026-02-17 19:30 방송제목: 오늘은 게임방송!
         result = pipeline._clean_filename("[타냐] 2026-02-17 19:30 방송제목: 오늘은 게임방송!")
 
+        assert "[타냐] 2026-02-17 19_30 방송제목_ 오늘은 게임방송!" in result
         assert "타냐" in result
         assert "방송제목" in result
         assert "게임방송" in result

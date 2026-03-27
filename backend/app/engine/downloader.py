@@ -1,6 +1,10 @@
 """
-Chzzk-Recorder-Pro: Live Engine (Streamlink 래퍼)
-Streamlink을 사용하여 치지직 라이브 스트림 URL을 추출한다.
+Chzzk-Recorder-Pro: Chzzk Live Engine (Streamlink 래퍼)
+
+Streamlink을 사용하여 치지직 라이브 스트림을 추출한다.
+- check_live_status(): API로 라이브 상태 확인
+- get_stream(): Streamlink Stream 객체 반환 (FFmpegPipeline Hybrid 모드용)
+- get_stream_url(): 치지직 라이브 URL 문자열 반환 (conductor 인터페이스 호환용)
 """
 
 from __future__ import annotations
@@ -27,11 +31,15 @@ class ChannelOfflineError(StreamExtractError):
     """채널이 오프라인 상태."""
 
 
-class StreamLinkEngine:
-    """Streamlink 기반 라이브 스트림 엔진.
+class ChzzkLiveEngine:
+    """Streamlink 기반 치지직 라이브 스트림 엔진.
 
     치지직 채널의 HLS 스트림 URL을 추출하고,
     인증 쿠키를 주입하여 성인 인증 방송에 접근한다.
+
+    conductor.py의 PlatformEngine 프로토콜 인터페이스:
+    - check_live_status(): 라이브 상태 확인
+    - get_stream_url(): URL 문자열 반환 (내부적으로 get_stream()을 래핑)
     """
 
     def __init__(self, auth: Optional[AuthManager] = None) -> None:
@@ -102,6 +110,18 @@ class StreamLinkEngine:
 
         return streams[quality]
 
+    def get_stream_url(self, channel_id: str) -> str:
+        """치지직 라이브 URL 문자열을 반환한다.
+
+        conductor.py의 PlatformEngine 인터페이스 규격(get_stream_url)을 구현한다.
+        실제로는 Streamlink가 스트림을 처리하므로, 이 URL은 YtdlpLivePipeline이 아닌
+        FFmpegPipeline(Hybrid Pipe 모드)에서 channel_id와 함께 사용한다.
+
+        Returns:
+            치지직 라이브 페이지 URL (Streamlink가 HLS를 추출하는 시작점)
+        """
+        return CHZZK_LIVE_URL.format(channel_id=channel_id)
+
     def get_available_qualities(self, channel_id: str) -> list[str]:
         """사용 가능한 화질 목록을 반환한다."""
         live_url = CHZZK_LIVE_URL.format(channel_id=channel_id)
@@ -113,3 +133,7 @@ class StreamLinkEngine:
         except Exception as e:
             logger.error(f"화질 목록 조회 실패: {e}")
             return []
+
+
+# 레거시 호환용 별칭 (기존 import를 사용하는 코드 호환성 유지)
+StreamLinkEngine = ChzzkLiveEngine
