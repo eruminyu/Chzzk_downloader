@@ -95,49 +95,47 @@ install_dependencies() {
   fi
   info "curl ✓"
 
-  # ffmpeg — 패키지 매니저 대신 johnvansickle.com 정적 빌드 사용
-  # 이유: apt/dnf는 OS 버전마다 ffmpeg 버전이 달라 동작이 불일치함.
-  # 정적 빌드는 항상 최신 안정 버전(현재 7.x+)을 OS 무관하게 설치.
+  # ffmpeg 8.0+ 정적 빌드 설치
+  # 출처: BtbN/FFmpeg-Builds (GitHub) — 버전별 정적 빌드 제공
+  # johnvansickle.com "release"는 아직 7.x 제공 중 (2025-03 기준)
   _install_ffmpeg_static() {
-    local arch
+    local arch url
     arch=$(uname -m)
     case "$arch" in
-      x86_64)  local dl_arch="amd64" ;;
-      aarch64) local dl_arch="arm64" ;;
-      armv7l)  local dl_arch="armhf" ;;
-      *)       error "지원하지 않는 CPU 아키텍처: $arch (amd64/arm64/armhf 만 지원)" ;;
+      x86_64)  url="https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.0-latest-linux64-gpl.tar.xz" ;;
+      aarch64) url="https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.0-latest-linuxarm64-gpl.tar.xz" ;;
+      *)       error "지원하지 않는 CPU 아키텍처: $arch (x86_64/aarch64 만 지원)" ;;
     esac
 
-    local url="https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-${dl_arch}-static.tar.xz"
     local tmpdir
     tmpdir=$(mktemp -d)
     trap "rm -rf '$tmpdir'" EXIT
 
-    info "ffmpeg 정적 빌드 다운로드 중 ($dl_arch)..."
-    curl -fsSL --retry 3 -o "$tmpdir/ffmpeg.tar.xz" "$url" \
-      || error "ffmpeg 다운로드 실패. 인터넷 연결을 확인하세요.\n  수동 설치: https://johnvansickle.com/ffmpeg/"
+    info "ffmpeg 8.0 정적 빌드 다운로드 중 ($arch)..."
+    curl -fsSL --retry 3 -L -o "$tmpdir/ffmpeg.tar.xz" "$url" \
+      || error "ffmpeg 다운로드 실패. 인터넷 연결을 확인하세요.\n  수동: https://github.com/BtbN/FFmpeg-Builds/releases"
 
     info "압축 해제 중..."
     tar xf "$tmpdir/ffmpeg.tar.xz" -C "$tmpdir"
 
-    local ffmpeg_dir
-    ffmpeg_dir=$(find "$tmpdir" -maxdepth 1 -type d -name "ffmpeg-*" | head -1)
-    [ -z "$ffmpeg_dir" ] && error "ffmpeg 압축 해제 실패."
+    local ffmpeg_bin ffprobe_bin
+    ffmpeg_bin=$(find "$tmpdir" -type f -name "ffmpeg" | head -1)
+    ffprobe_bin=$(find "$tmpdir" -type f -name "ffprobe" | head -1)
+    [ -z "$ffmpeg_bin" ] && error "ffmpeg 압축 해제 실패."
 
-    sudo install -m 755 "$ffmpeg_dir/ffmpeg"  /usr/local/bin/ffmpeg
-    sudo install -m 755 "$ffmpeg_dir/ffprobe" /usr/local/bin/ffprobe
+    sudo install -m 755 "$ffmpeg_bin" /usr/local/bin/ffmpeg
+    [ -n "$ffprobe_bin" ] && sudo install -m 755 "$ffprobe_bin" /usr/local/bin/ffprobe
     trap - EXIT
     rm -rf "$tmpdir"
   }
 
-  # 시스템 ffmpeg 버전과 무관하게 항상 정적 빌드를 /usr/local/bin에 설치
-  # (apt 등 패키지 매니저는 OS 버전마다 ffmpeg 버전이 달라 동작 불일치 발생)
+  # 항상 정적 빌드 설치 (패키지 매니저 버전 무시)
   _install_ffmpeg_static
 
   # 최소 버전 검증: ffmpeg 8.0+ 필수
   _FFMPEG_MAJOR=$(ffmpeg -version 2>&1 | head -1 | grep -oP '(?<=version )\d+' | head -1)
   if [ -z "$_FFMPEG_MAJOR" ] || [ "$_FFMPEG_MAJOR" -lt 8 ]; then
-    error "ffmpeg 8.0 이상이 필요합니다 (현재: ${_FFMPEG_MAJOR:-알 수 없음}.x).\n  설치 스크립트가 최신 빌드를 받아왔는데도 이 오류가 나온다면\n  johnvansickle.com 에서 수동으로 8.0+ 빌드를 설치하세요."
+    error "ffmpeg 8.0 이상이 필요합니다 (현재: ${_FFMPEG_MAJOR:-알 수 없음}.x).\n  https://github.com/BtbN/FFmpeg-Builds/releases 에서 수동 설치하세요."
   fi
   info "ffmpeg $(ffmpeg -version 2>&1 | head -1 | awk '{print $3}') ✓"
 
