@@ -189,13 +189,13 @@ async def update_x_settings(req: XSettingsRequest):
     return {"message": "X Spaces 인증 설정 저장 완료."}
 
 
-_COOKIE_SAVE_PATH = Path("data/x_cookies.txt")
+_COOKIE_SAVE_PATH = Path(__file__).resolve().parents[2] / "data" / "x_cookies.txt"
 
 
 @router.post("/x/cookie", summary="X Spaces 쿠키 파일 업로드")
 async def upload_x_cookie(file: UploadFile = File(...)):
     """Netscape 형식 쿠키 파일을 업로드하여 서버에 저장합니다."""
-    save_path = _COOKIE_SAVE_PATH.resolve()
+    save_path = _COOKIE_SAVE_PATH
     save_path.parent.mkdir(parents=True, exist_ok=True)
 
     content = await file.read()
@@ -209,7 +209,7 @@ async def upload_x_cookie(file: UploadFile = File(...)):
 @router.delete("/x/cookie", summary="X Spaces 쿠키 파일 삭제")
 async def delete_x_cookie():
     """저장된 쿠키 파일을 삭제하고 설정을 초기화합니다."""
-    save_path = _COOKIE_SAVE_PATH.resolve()
+    save_path = _COOKIE_SAVE_PATH
     if save_path.exists():
         save_path.unlink()
 
