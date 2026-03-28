@@ -10,8 +10,7 @@
 - **Language**: Python 3.12+
 - **Framework**: FastAPI (ASGI)
 - **Core Libraries**:
-  - `streamlink`: 라이브 스트림 추출
-  - `yt-dlp`: 외부 사이트(YouTube 등) VOD 다운로드
+  - `yt-dlp`: 라이브 스트림 추출 및 VOD 다운로드
   - `ffmpeg-python`: 비디오 인코딩 및 처리
   - `chzzkpy`: 치지직 API 연동 (채팅, 채널 정보)
 - **Database**: JSON 파일 기반 로컬 스토리지 (NoSQL-like)

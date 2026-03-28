@@ -1,6 +1,6 @@
 """
 test_auth.py
-쿠키 파싱, 헤더 생성, streamlink 옵션 빌드 테스트
+쿠키 파싱, 헤더 생성, yt-dlp 쿠키 빌드 테스트
 """
 
 from pathlib import Path
@@ -105,24 +105,6 @@ class TestAuthManager:
 
             assert "User-Agent" in headers
             assert "Cookie" not in headers
-
-    def test_get_streamlink_options_with_cookies(self):
-        """인증 쿠키가 있는 경우 Streamlink 옵션"""
-        auth = AuthManager(nid_aut="test_aut", nid_ses="test_ses")
-        options = auth.get_streamlink_options()
-
-        assert "http-cookies" in options
-        assert options["http-cookies"] == {"NID_AUT": "test_aut", "NID_SES": "test_ses"}
-
-    def test_get_streamlink_options_without_cookies(self):
-        """인증 쿠키가 없는 경우 Streamlink 옵션"""
-        mock_settings = Settings(nid_aut=None, nid_ses=None)
-
-        with patch('app.engine.auth.get_settings', return_value=mock_settings):
-            auth = AuthManager(nid_aut=None, nid_ses=None)
-            options = auth.get_streamlink_options()
-
-            assert options == {}
 
     def test_get_ytdlp_cookies_with_auth(self):
         """인증 쿠키가 있는 경우 yt-dlp 쿠키 문자열"""

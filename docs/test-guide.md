@@ -156,7 +156,6 @@ docker image rm chzzk-recorder
 ### 사전 준비
 ```bash
 sudo apt update && sudo apt install -y python3.12 python3.12-venv ffmpeg git
-pip install streamlink
 
 cd /path/to/Chzzk_downloader
 ```

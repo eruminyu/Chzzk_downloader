@@ -180,12 +180,12 @@ class XSpacesEngine:
             return self._offline_status(channel_id)
 
     def get_stream(self, channel_id: str, quality: str = "best") -> object:
-        """X Spaces는 streamlink 미지원.
+        """X Spaces는 직접 스트림 추출 미지원.
 
-        대신 캡처된 m3u8 URL을 VodEngine으로 다운로드할 것.
+        캡처된 m3u8 URL을 VodEngine으로 다운로드할 것.
         """
         raise NotImplementedError(
-            "X Spaces는 streamlink를 지원하지 않습니다. "
+            "X Spaces는 직접 스트림 추출을 지원하지 않습니다. "
             "캡처된 m3u8_url을 VodEngine에 전달하세요."
         )
 

@@ -157,7 +157,7 @@ class FFmpegPipeline:
 
     async def start_recording(
         self,
-        stream_obj: Optional[object] = None, # streamlink.Stream or string URL
+        stream_obj: Optional[object] = None, # HLS URL or stream object
         output_dir: Optional[str] = None,
         filename: Optional[str] = None,
         headers: Optional[dict[str, str]] = None,
@@ -277,11 +277,10 @@ class FFmpegPipeline:
             raise
 
     async def _run_feeder(self, stream_obj: object) -> None:
-        """Streamlink 데이터를 FFmpeg stdin으로 전달한다."""
+        """스트림 데이터를 FFmpeg stdin으로 전달한다."""
         max_open_retries = 3
         for attempt in range(1, max_open_retries + 1):
             try:
-                # streamlink.Stream.open()은 blocking이므로 스레드에서 실행
                 self._stream_fd = await asyncio.to_thread(lambda: stream_obj.open())  # type: ignore
                 logger.info(f"[{self._channel_id}] 스트림 열기 성공 (시도 {attempt}/{max_open_retries})")
                 break

@@ -22,7 +22,6 @@ WORKDIR /app
 # 런타임에 버전을 자동 감지하여 필요한 옵션만 적용됨
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
-    streamlink \
     && rm -rf /var/lib/apt/lists/*
 
 # Python 의존성 설치

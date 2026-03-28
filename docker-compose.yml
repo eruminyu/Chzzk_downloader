@@ -8,7 +8,7 @@ services:
     ports:
       - "${PORT:-8000}:8000"
     environment:
-      # Docker 환경에서는 ffmpeg/streamlink가 시스템에 설치됨
+      # Docker 환경에서는 ffmpeg가 시스템에 설치됨
       - FFMPEG_PATH=ffmpeg
       - TZ=Asia/Seoul
     volumes:
