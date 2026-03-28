@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Plus, Trash2, Video, Radio, Play, AlertTriangle, Square, AlertCircle, Users, Eye, Loader2, WifiOff, MessageSquare, ChevronDown, Lock, LayoutGrid, List } from "lucide-react";
+import { Plus, Trash2, Video, Radio, Play, AlertTriangle, Square, AlertCircle, Users, Eye, Loader2, WifiOff, MessageSquare, ChevronDown, Lock, LayoutGrid, List, RefreshCw } from "lucide-react";
 import { api, client, Channel, Platform, PlatformStatus, PLATFORM_LABELS } from "../api/client";
 // client를 직접 import해서 멀티 플랫폼 엔드포인트에 접근
 const client_raw = client;
@@ -210,6 +210,15 @@ export default function Dashboard() {
         }
     };
 
+    const handleScanNow = async () => {
+        try {
+            await api.scanNow();
+            toast.success("즉시 스캔 요청됨. 잠시 후 상태가 업데이트됩니다.");
+        } catch {
+            toast.error("즉시 스캔 요청에 실패했습니다.");
+        }
+    };
+
     const handleToggleAutoRecord = async (channel: Channel) => {
         const platform = channel.platform || "chzzk";
         try {
@@ -400,6 +409,9 @@ export default function Dashboard() {
                             <button onClick={()=>setFilter("offline")} className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${filter === "offline" ? "bg-zinc-800 text-zinc-300" : "text-zinc-400 hover:bg-zinc-800/50"}`}>오프라인</button>
                         </div>
                         <div className="flex gap-2">
+                            <button onClick={handleScanNow} className="px-3 py-1.5 bg-blue-500/10 text-blue-400 border border-blue-500/20 hover:bg-blue-500/20 rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 whitespace-nowrap">
+                                <RefreshCw className="w-4 h-4" /> 즉시 스캔
+                            </button>
                             <button onClick={handleStopAll} disabled={recCount === 0} className="px-3 py-1.5 bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 disabled:opacity-50 hover:shadow-lg hover:shadow-red-500/20 whitespace-nowrap">
                                 <Square className="w-4 h-4 fill-current" /> 전체 중지
                             </button>

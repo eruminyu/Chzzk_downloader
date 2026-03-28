@@ -76,15 +76,19 @@ class RecorderService:
         """모든 채널 상태를 반환한다."""
         return self._conductor.get_all_status()
 
-    def toggle_auto_record(self, composite_key: str) -> dict:
+    async def toggle_auto_record(self, composite_key: str) -> dict:
         """채널의 자동 녹화 설정을 토글한다."""
-        new_value = self._conductor.toggle_auto_record(composite_key)
+        new_value = await self._conductor.toggle_auto_record(composite_key)
         logger.info(f"[Service] 자동 녹화 토글: {composite_key} → {'ON' if new_value else 'OFF'}")
         return {
             "composite_key": composite_key,
             "auto_record": new_value,
             "message": f"자동 녹화 {'ON' if new_value else 'OFF'}",
         }
+
+    def scan_now(self, composite_key: Optional[str] = None) -> None:
+        """채널 폴링 주기를 무시하고 즉시 스캔을 트리거한다."""
+        self._conductor.trigger_scan_now(composite_key)
 
     # ── 라이브 녹화 ──────────────────────────────────────
 
@@ -140,6 +144,10 @@ class RecorderService:
     async def capture_space(self, username: str) -> dict:
         """Twitter Spaces m3u8 URL을 즉시 1회 조회한다."""
         return await self._conductor.capture_space(username)
+
+    async def download_space(self, space_url: str) -> dict:
+        """Space URL로 직접 다운로드한다 (채널 등록 불필요)."""
+        return await self._conductor.download_space(space_url)
 
     async def download_vod(
         self,

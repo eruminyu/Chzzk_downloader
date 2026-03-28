@@ -85,7 +85,7 @@ async def toggle_auto_record(channel_id: str):
     composite_key = Conductor.make_composite_key(Platform.CHZZK, channel_id)
 
     try:
-        return service.toggle_auto_record(composite_key)
+        return await service.toggle_auto_record(composite_key)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 

@@ -41,7 +41,7 @@ class SetupCompleteRequest(BaseModel):
 
     # Step 1: 기본 설정
     download_dir: str = Field(..., description="녹화 저장 경로")
-    output_format: str = Field("ts", description="녹화 출력 포맷 (ts, mp4, mkv)")
+    live_format: str = Field("ts", description="라이브 녹화 포맷 (ts, mp4, mkv)")
     recording_quality: str = Field("best", description="녹화 품질 (best, 1080p, 720p, 480p)")
 
     # Step 2: 치지직 인증 (선택)
@@ -69,7 +69,7 @@ async def complete_setup(req: SetupCompleteRequest):
     VALID_FORMATS = {"ts", "mp4", "mkv"}
     VALID_QUALITIES = {"best", "1080p", "720p", "480p"}
 
-    fmt = req.output_format.lower()
+    fmt = req.live_format.lower()
     quality = req.recording_quality.lower()
 
     if fmt not in VALID_FORMATS:
@@ -88,7 +88,7 @@ async def complete_setup(req: SetupCompleteRequest):
     # .env 파일에 설정 저장 (이 파일이 생성되면 곧 초기설정 완료를 의미)
     env_updates: dict[str, str] = {
         "DOWNLOAD_DIR": download_dir,
-        "OUTPUT_FORMAT": fmt,
+        "LIVE_FORMAT": fmt,
         "RECORDING_QUALITY": quality,
     }
     if req.nid_aut and req.nid_ses:
@@ -100,7 +100,7 @@ async def complete_setup(req: SetupCompleteRequest):
     # in-memory 설정 즉시 반영
     settings = get_settings()
     settings.download_dir = download_dir
-    settings.output_format = fmt
+    settings.live_format = fmt
     settings.recording_quality = quality
     if req.nid_aut and req.nid_ses:
         settings.nid_aut = req.nid_aut

@@ -400,6 +400,11 @@ export const api = {
         const res = await client.patch(`/platforms/channels/${platform}/${channel_id}/auto-record`);
         return res.data;
     },
+    scanNow: async (compositeKey?: string) => {
+        const params = compositeKey ? { composite_key: compositeKey } : {};
+        const res = await client.post("/platforms/scan-now", null, { params });
+        return res.data;
+    },
     getPlatformStatus: async (): Promise<PlatformStatus> => {
         const res = await client.get<PlatformStatus>("/platforms/status");
         return res.data;

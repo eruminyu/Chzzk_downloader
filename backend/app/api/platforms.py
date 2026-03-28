@@ -130,7 +130,18 @@ async def toggle_platform_auto_record(platform: str, channel_id: str):
 
     service = get_recorder_service()
     composite_key = f"{platform_enum.value}:{channel_id}"
-    return service.toggle_auto_record(composite_key)
+    return await service.toggle_auto_record(composite_key)
+
+
+@router.post("/scan-now", summary="즉시 스캔")
+async def trigger_scan_now(composite_key: Optional[str] = None):
+    """설정된 폴링 주기를 무시하고 모든 채널(또는 특정 채널)을 즉시 스캔합니다."""
+    from app.main import get_recorder_service
+
+    service = get_recorder_service()
+    service.scan_now(composite_key)
+    target = composite_key or "전체"
+    return {"message": f"즉시 스캔 요청됨: {target}"}
 
 
 # ── 플랫폼 엔진 상태 ─────────────────────────────────────

@@ -127,30 +127,32 @@ class TestConductor:
 
         assert conductor.channel_count == 0
 
-    def test_toggle_auto_record(self, isolated_conductor):
+    @pytest.mark.asyncio
+    async def test_toggle_auto_record(self, isolated_conductor):
         """자동 녹화 토글"""
         conductor = isolated_conductor
         key = Conductor.make_composite_key(Platform.CHZZK, "test_channel")
 
         conductor.add_channel(channel_id="test_channel", auto_record=True)
 
-        # True → False
-        new_value = conductor.toggle_auto_record(key)
+        # True → False (is_live=False이므로 즉시 녹화 시작 없음)
+        new_value = await conductor.toggle_auto_record(key)
         assert new_value is False
         assert conductor._channels[key].auto_record is False
 
         # False → True
-        new_value = conductor.toggle_auto_record(key)
+        new_value = await conductor.toggle_auto_record(key)
         assert new_value is True
         assert conductor._channels[key].auto_record is True
 
-    def test_toggle_auto_record_nonexistent(self, isolated_conductor):
+    @pytest.mark.asyncio
+    async def test_toggle_auto_record_nonexistent(self, isolated_conductor):
         """존재하지 않는 채널의 자동 녹화 토글 시도"""
         conductor = isolated_conductor
 
         # Conductor.toggle_auto_record는 ValueError 발생
         with pytest.raises(ValueError, match="찾을 수 없습니다"):
-            conductor.toggle_auto_record(Conductor.make_composite_key(Platform.CHZZK, "nonexistent"))
+            await conductor.toggle_auto_record(Conductor.make_composite_key(Platform.CHZZK, "nonexistent"))
 
     def test_get_all_status_empty(self, isolated_conductor):
         """빈 채널 목록 상태 조회"""
