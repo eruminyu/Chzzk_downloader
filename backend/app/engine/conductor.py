@@ -48,6 +48,7 @@ class ChannelTask:
     last_error: Optional[str] = None
     # X Spaces 전용
     spaces_process: Optional[asyncio.subprocess.Process] = field(default=None, repr=False)
+    spaces_output_path: Optional[str] = None
     _current_space_id: Optional[str] = None
     # X Spaces 전용: 라이브 중 캡처한 dynamic m3u8 URL
     captured_m3u8_url: Optional[str] = None
@@ -927,7 +928,7 @@ class Conductor:
             engine: XSpacesEngine = self._get_engine(Platform.X_SPACES)
 
             settings = get_settings()
-            process = await engine.start_ytdlp_recording(
+            process, output_path = await engine.start_ytdlp_recording(
                 space_id=task._current_space_id,
                 output_dir=settings.download_dir,
                 channel_name=channel_name or task.channel_name or task.channel_id,
@@ -935,6 +936,7 @@ class Conductor:
                 cookie_file=settings.x_cookie_file,
             )
             task.spaces_process = process
+            task.spaces_output_path = output_path
             logger.info(f"[{composite_key}] X Spaces 녹화 시작 (space_id={task._current_space_id}).")
 
             if self._discord_bot:
@@ -1002,6 +1004,7 @@ class Conductor:
             return
 
         proc = task.spaces_process
+        output_path = task.spaces_output_path
         try:
             if proc.returncode is None:
                 proc.terminate()
@@ -1010,8 +1013,17 @@ class Conductor:
                 except asyncio.TimeoutError:
                     proc.kill()
             task.spaces_process = None
+            task.spaces_output_path = None
             task._current_space_id = None
             logger.info(f"[{composite_key}] Spaces 녹화 중지.")
+
+            # yt-dlp가 SIGTERM으로 종료되면 .part 파일이 남을 수 있음 → rename
+            if output_path:
+                part_file = Path(output_path + ".part")
+                final_file = Path(output_path)
+                if part_file.exists() and not final_file.exists():
+                    part_file.rename(final_file)
+                    logger.info(f"[{composite_key}] .part 파일 rename 완료: {final_file.name}")
         except Exception as e:
             logger.error(f"[{composite_key}] Spaces 녹화 중지 실패: {e}")
 

@@ -232,7 +232,7 @@ class XSpacesEngine:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        return process
+        return process, str(output_path)
 
     async def download_by_space_url(
         self,
