@@ -140,7 +140,10 @@ class TwitcastingEngine:
         for item in raw_movies:
             movie = item.get("movie") or {}
             broadcaster = item.get("broadcaster") or {}
-            movie_id = movie.get("id", "")
+            movie_id = movie.get("id")
+            if not movie_id:
+                continue  # ID 없는 항목 스킵 (비정상 응답 방어)
+            movie_id = str(movie_id)
             movies.append({
                 "id": movie_id,
                 "title": movie.get("title", ""),

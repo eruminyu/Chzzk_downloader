@@ -567,6 +567,12 @@ class YtdlpLivePipeline:
         if ffmpeg_supports_extension_picky(ffmpeg_path):
             cmd += ["-extension_picky", "0"]
             logger.debug(f"[{self._channel_id}] extension_picky 비활성화 적용 (ffmpeg 7.1.1+)")
+        # yt-dlp가 추출한 HTTP 헤더를 ffmpeg에 전달 (TwitCasting 등 Origin/Referer 필요 플랫폼)
+        # Chzzk는 HLS URL에 Akamai 토큰이 내장되어 있어 헤더 불필요 → http_headers가 비어 있음
+        if http_headers:
+            header_str = "".join(f"{k}: {v}\r\n" for k, v in http_headers.items())
+            cmd += ["-headers", header_str]
+            logger.debug(f"[{self._channel_id}] ffmpeg HTTP 헤더 주입: {list(http_headers.keys())}")
         cmd += ["-i", hls_url, "-c", "copy"]
 
         # 라이브 HLS → MPEG-TS 출력 강제 (yt-dlp FFmpegFD와 동일)
