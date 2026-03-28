@@ -336,8 +336,10 @@ class VodEngine:
                 task.url = await self._resolve_clip_url(task_id, task.url)
 
             try:
-                # 모든 URL → yt-dlp (Chzzk VOD/클립/외부)
-                await self._download_external(task_id, task)
+                if self._is_x_spaces_url(task.url):
+                    await self._download_x_spaces_replay(task_id, task)
+                else:
+                    await self._download_external(task_id, task)
 
             except DownloadCancelledError:
                 task.state = VodDownloadState.IDLE
@@ -432,6 +434,126 @@ class VodEngine:
             logger.warning(f"[{task_id}] 클립 API 조회 실패, 원본 URL 사용: {e}")
 
         return clip_url
+
+    async def _download_x_spaces_replay(self, task_id: str, task: VodDownloadTask) -> None:
+        """pscp.tv master_playlist.m3u8을 ffmpeg로 직접 다운로드한다.
+
+        yt-dlp 대신 Colab 방식(playlist 파싱 → chunk URL 절대경로 재작성 → ffmpeg)을 사용.
+        pscp.tv CDN의 상대경로 chunk URL 구조 때문에 yt-dlp generic HLS extractor가 실패하는 문제 해결.
+        """
+        import re
+        import httpx
+        from urllib.parse import urlparse
+
+        settings = get_settings()
+        ffmpeg_path = settings.resolve_ffmpeg_path()
+        master_url = task.url
+
+        # 1. master_playlist.m3u8 파싱 → sub-playlist URL 추출
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.get(master_url)
+            resp.raise_for_status()
+            master_text = resp.text
+
+        parsed = urlparse(master_url)
+        playlist_path = None
+        for line in master_text.splitlines():
+            stripped = line.strip()
+            if stripped and not stripped.startswith('#'):
+                playlist_path = stripped
+                break
+
+        if not playlist_path:
+            raise RuntimeError("master_playlist.m3u8에서 sub-playlist URL을 찾을 수 없습니다.")
+
+        if playlist_path.startswith('http'):
+            playlist_url = playlist_path
+        elif playlist_path.startswith('/'):
+            playlist_url = f"{parsed.scheme}://{parsed.netloc}{playlist_path}"
+        else:
+            playlist_url = master_url.rsplit('/', 1)[0] + '/' + playlist_path
+
+        # 2. sub-playlist 가져오기 → chunk URL 절대경로로 재작성
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.get(playlist_url)
+            resp.raise_for_status()
+            playlist_text = resp.text
+
+        base_url = re.sub(r"master_playlist\.m3u8.*", "", master_url)
+
+        def _abs(line: str) -> str:
+            s = line.strip()
+            if not s or s.startswith('#'):
+                return line
+            if s.startswith('http'):
+                return line
+            if s.startswith('/'):
+                return f"{parsed.scheme}://{parsed.netloc}{s}"
+            return base_url + s
+
+        playlist_abs = '\n'.join(_abs(l) for l in playlist_text.splitlines())
+
+        # 3. 임시 .m3u8 파일 저장
+        tmp_m3u8 = Path(task.output_dir) / f"_tmp_{task_id}.m3u8"
+        tmp_m3u8.write_text(playlist_abs, encoding='utf-8')
+
+        # 4. 출력 파일명
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_path = Path(task.output_dir) / f"[XSpaces] {timestamp}.m4a"
+        task.title = f"[X Spaces] {timestamp}"
+        logger.info(f"[{task_id}] X Spaces ffmpeg 다운로드 시작: {output_path.name}")
+
+        try:
+            cmd = [
+                ffmpeg_path, "-y",
+                "-protocol_whitelist", "file,https,tls,tcp,crypto",
+                "-i", str(tmp_m3u8),
+                "-c", "copy",
+                "-vn",
+                str(output_path),
+            ]
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            _, stderr_data = await proc.communicate()
+
+            if proc.returncode != 0:
+                err = stderr_data.decode(errors='replace')[-500:]
+                raise RuntimeError(f"ffmpeg 오류 (code={proc.returncode}): {err}")
+
+            if not output_path.exists() or output_path.stat().st_size == 0:
+                raise RuntimeError("다운로드 완료 후 파일이 없거나 비어 있습니다.")
+
+            task.state = VodDownloadState.COMPLETED
+            task.completed_at = datetime.now()
+            task.output_path = str(output_path)
+            task.progress = 100.0
+            logger.info(f"[{task_id}] X Spaces 다운로드 완료: {output_path.name}")
+            self._save_history()
+
+            if self._discord_bot:
+                try:
+                    file_size = output_path.stat().st_size / (1024 * 1024)
+                    duration = (task.completed_at - task.started_at).total_seconds() if task.started_at else 0
+                    await self._discord_bot.send_notification(
+                        title="📥 X Spaces 다운로드 완료",
+                        description=f"파일: **{output_path.name}**",
+                        color="green",
+                        fields={
+                            "파일 크기": f"{file_size:.1f} MB",
+                            "다운로드 시간": f"{duration // 60:.0f}분 {duration % 60:.0f}초",
+                            "저장 경로": str(output_path),
+                        },
+                    )
+                except Exception as e:
+                    logger.error(f"[{task_id}] Discord X Spaces 완료 알림 전송 실패: {e}")
+        finally:
+            try:
+                tmp_m3u8.unlink(missing_ok=True)
+            except Exception:
+                pass
 
     async def _download_external(self, task_id: str, task: VodDownloadTask) -> None:
         """yt-dlp를 사용한 외부 URL(유튜브 등) 다운로드."""
