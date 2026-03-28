@@ -14,6 +14,22 @@ from typing import Optional
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+def _download_ytdlp_exe(dest: Path) -> None:
+    """yt-dlp.exe를 GitHub Releases에서 자동 다운로드한다."""
+    import urllib.request
+
+    url = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_suffix(".tmp")
+    try:
+        urllib.request.urlretrieve(url, tmp)
+        tmp.replace(dest)
+    except Exception:
+        if tmp.exists():
+            tmp.unlink()
+        raise
+
+
 def _resolve_env_file() -> str:
     """실행 환경에 맞는 .env 파일의 절대 경로를 문자열로 반환한다.
 
@@ -100,6 +116,52 @@ class Settings(BaseSettings):
     # ── X Spaces 인증 ────────────────────────────────────
     x_bearer_token: Optional[str] = None
     x_cookie_file: Optional[str] = None  # Netscape 형식 쿠키 파일 경로
+
+    def resolve_ytdlp_path(self, auto_download: bool = False) -> str:
+        """yt-dlp 실행 파일 경로를 탐색 순서에 따라 결정한다.
+
+        탐색 순서:
+            1. 시스템 PATH
+            2. exe/스크립트 옆 bin/ 폴더 (배포 번들 및 개발 환경)
+            3. venv bin/ (개발 환경)
+            4. Windows exe 환경에서 자동 다운로드 (auto_download=True 시)
+        """
+        import sys as _sys
+
+        # 1) 시스템 PATH
+        for name in ("yt-dlp", "yt-dlp.exe"):
+            found = shutil.which(name)
+            if found:
+                return found
+
+        # 2) exe/프로젝트 옆 bin/ 폴더
+        if getattr(_sys, "frozen", False):
+            base_dir = Path(_sys.executable).parent
+        else:
+            base_dir = Path(__file__).resolve().parents[3]
+
+        for fname in ("yt-dlp.exe", "yt-dlp"):
+            candidate = base_dir / "bin" / fname
+            if candidate.is_file():
+                return str(candidate)
+
+        # 3) venv bin/ (개발 환경)
+        venv_bin = Path(_sys.executable).parent
+        for name in ("yt-dlp", "yt-dlp.exe"):
+            candidate = venv_bin / name
+            if candidate.is_file():
+                return str(candidate)
+
+        # 4) Windows exe 환경에서 자동 다운로드
+        if auto_download and getattr(_sys, "frozen", False) and _sys.platform == "win32":
+            dest = base_dir / "bin" / "yt-dlp.exe"
+            _download_ytdlp_exe(dest)
+            return str(dest)
+
+        raise FileNotFoundError(
+            "yt-dlp를 찾을 수 없습니다. "
+            "pip install yt-dlp 또는 프로그램 옆 bin/yt-dlp.exe를 배치하세요."
+        )
 
     def resolve_ffmpeg_path(self) -> str:
         """FFmpeg 실행 파일 경로를 탐색 순서에 따라 결정한다.

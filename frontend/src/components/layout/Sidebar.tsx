@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { NavLink } from "react-router-dom";
-import { LayoutDashboard, Download, Settings, Tv, Menu, X, MessageSquare, BarChart2, Archive, Bell, CheckCircle, AlertCircle, AlertTriangle } from "lucide-react";
+import { LayoutDashboard, Download, Settings, Tv, Menu, X, MessageSquare, BarChart2, Radio, Bell, CheckCircle, AlertCircle, AlertTriangle } from "lucide-react";
 import { clsx } from "clsx";
 import { useTheme } from "../../context/ThemeContext";
 import { useVod } from "../../contexts/VodContext";
@@ -42,7 +42,7 @@ export function Sidebar() {
             title: "미디어 허브",
             items: [
                 { name: "VOD Downloader", to: "/vod", icon: Download },
-                { name: "Archive", to: "/archive", icon: Archive },
+                { name: "X Spaces", to: "/archive", icon: Radio },
                 { name: "Chat Logs", to: "/chat", icon: MessageSquare },
             ]
         },

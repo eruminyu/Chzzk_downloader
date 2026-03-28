@@ -189,7 +189,11 @@ async def update_x_settings(req: XSettingsRequest):
     return {"message": "X Spaces 인증 설정 저장 완료."}
 
 
-_COOKIE_SAVE_PATH = Path(__file__).resolve().parents[2] / "data" / "x_cookies.txt"
+import sys as _sys
+if getattr(_sys, "frozen", False):
+    _COOKIE_SAVE_PATH = Path(_sys.executable).parent / "data" / "x_cookies.txt"
+else:
+    _COOKIE_SAVE_PATH = Path(__file__).resolve().parents[2] / "data" / "x_cookies.txt"
 
 
 @router.post("/x/cookie", summary="X Spaces 쿠키 파일 업로드")

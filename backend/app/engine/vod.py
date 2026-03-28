@@ -166,7 +166,9 @@ class VodEngine:
         # 빈 파일 반환. "bestaudio/best"로 오버라이드해야 정상 다운로드됨.
         if self._is_x_spaces_url(task.url):
             opts["format"] = "bestaudio/best"
-            logger.debug(f"[{task.task_id}] X Spaces URL 감지 → format=bestaudio/best 오버라이드")
+            opts["merge_output_format"] = "m4a"
+            opts["postprocessors"] = [{"key": "FFmpegExtractAudio", "preferredcodec": "m4a"}]
+            logger.debug(f"[{task.task_id}] X Spaces URL 감지 → format=bestaudio/best, m4a 오디오 전용 출력")
 
         # 진행률 콜백
         if progress_callback:

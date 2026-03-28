@@ -63,6 +63,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except FileNotFoundError as e:
         logger.warning(f"⚠️ {e}")
 
+    # yt-dlp 경로 검증 (Windows exe 환경에서 없으면 자동 다운로드)
+    try:
+        ytdlp = settings.resolve_ytdlp_path(auto_download=True)
+        logger.info(f"✅ yt-dlp 확인: {ytdlp}")
+    except Exception as e:
+        logger.warning(f"⚠️ yt-dlp 확인 실패: {e}")
+
     # 서비스 초기화
     auth = AuthManager()
     conductor = Conductor(auth=auth)

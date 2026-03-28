@@ -92,7 +92,12 @@ class Conductor:
         self._x_spaces_engine: Optional[XSpacesEngine] = None
         self._channels: dict[str, ChannelTask] = {}
         self._running = False
-        _data_dir = Path(__file__).resolve().parents[2] / "data"
+        import sys as _sys
+        if getattr(_sys, "frozen", False):
+            # PyInstaller exe: 임시 압축 경로 대신 exe 옆 data/ 폴더 사용
+            _data_dir = Path(_sys.executable).parent / "data"
+        else:
+            _data_dir = Path(__file__).resolve().parents[2] / "data"
         _data_dir.mkdir(parents=True, exist_ok=True)
         self._persistence_path = _data_dir / "channels.json"
         self._discord_bot = discord_bot

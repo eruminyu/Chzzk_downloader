@@ -49,6 +49,46 @@ def _check_python_version() -> bool:
     return sys.version_info >= (3, 12)
 
 
+def _find_ytdlp() -> str | None:
+    """yt-dlp 실행 파일을 탐색한다.
+
+    탐색 순서:
+        1. exe 옆 bin/yt-dlp.exe (배포 번들용)
+        2. 시스템 PATH
+    """
+    if IS_FROZEN:
+        bundle_dir = Path(sys.executable).parent
+    else:
+        bundle_dir = Path(__file__).resolve().parent.parent
+
+    for fname in ("yt-dlp.exe", "yt-dlp"):
+        p = bundle_dir / "bin" / fname
+        if p.is_file():
+            return str(p)
+
+    return shutil.which("yt-dlp")
+
+
+def _download_ytdlp(bin_dir: Path) -> str | None:
+    """yt-dlp.exe를 GitHub Releases에서 자동 다운로드한다."""
+    import urllib.request
+
+    url = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe"
+    dest = bin_dir / "yt-dlp.exe"
+    tmp = bin_dir / "yt-dlp.tmp"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        print("  yt-dlp 다운로드 중... (GitHub Releases)")
+        urllib.request.urlretrieve(url, tmp)
+        tmp.replace(dest)
+        return str(dest)
+    except Exception as e:
+        if tmp.exists():
+            tmp.unlink()
+        print(f"  ⚠️  yt-dlp 자동 다운로드 실패: {e}")
+        return None
+
+
 def _find_ffmpeg() -> str | None:
     """FFmpeg 실행 파일을 탐색한다.
 
@@ -102,6 +142,22 @@ def _run_dependency_check() -> bool:
     else:
         print("  [!!]  FFmpeg를 찾을 수 없습니다.")
         all_ok = False
+
+    # ── yt-dlp 확인 (없으면 자동 다운로드) ──────────────────
+    ytdlp_path = _find_ytdlp()
+    if ytdlp_path:
+        print(f"  [OK]  yt-dlp: {ytdlp_path}")
+    else:
+        print("  [--]  yt-dlp를 찾을 수 없습니다. 자동 다운로드 시도 중...")
+        if IS_FROZEN:
+            bin_dir = Path(sys.executable).parent / "bin"
+        else:
+            bin_dir = Path(__file__).resolve().parent.parent / "bin"
+        ytdlp_path = _download_ytdlp(bin_dir)
+        if ytdlp_path:
+            print(f"  [OK]  yt-dlp 설치 완료: {ytdlp_path}")
+        else:
+            print("  [!!]  yt-dlp 설치 실패 — 녹화 기능이 동작하지 않을 수 있습니다.")
 
     print("=" * 60)
 

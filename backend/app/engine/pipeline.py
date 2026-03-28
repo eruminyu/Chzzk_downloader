@@ -8,8 +8,6 @@ from __future__ import annotations
 
 import asyncio
 import asyncio.subprocess
-import shutil
-import sys
 import tempfile
 from datetime import datetime
 from enum import Enum
@@ -618,7 +616,7 @@ class YtdlpLivePipeline:
         """
         import json as _json
 
-        ytdlp_path = self._resolve_ytdlp_path()
+        ytdlp_path = get_settings().resolve_ytdlp_path()
         fmt = self._QUALITY_MAP.get(quality, self._QUALITY_MAP["best"])
 
         cmd = [ytdlp_path, page_url, "--format", fmt, "-j", "--no-warnings"]
@@ -785,24 +783,6 @@ class YtdlpLivePipeline:
             "download_speed": round(self._download_speed, 2),
             "bitrate": round(self._bitrate, 1),
         }
-
-    @staticmethod
-    def _resolve_ytdlp_path() -> str:
-        """yt-dlp 실행 파일 경로를 찾는다."""
-        for name in ("yt-dlp", "yt-dlp.exe", "yt_dlp"):
-            path = shutil.which(name)
-            if path:
-                return path
-
-        venv_bin = Path(sys.executable).parent
-        for name in ("yt-dlp", "yt-dlp.exe", "yt_dlp"):
-            candidate = venv_bin / name
-            if candidate.is_file():
-                return str(candidate)
-
-        raise FileNotFoundError(
-            "yt-dlp를 찾을 수 없습니다. pip install yt-dlp 또는 PATH에 추가하세요."
-        )
 
     @staticmethod
     def _write_cookie_file(cookie_str: str) -> str:

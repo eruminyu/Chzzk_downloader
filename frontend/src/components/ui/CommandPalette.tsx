@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Command } from "cmdk";
 import { useNavigate } from "react-router-dom";
-import { LayoutDashboard, Download, Settings, MessageSquare, Archive, BarChart2 } from "lucide-react";
+import { LayoutDashboard, Download, Settings, MessageSquare, Radio, BarChart2 } from "lucide-react";
 
 export function CommandPalette() {
     const [open, setOpen] = useState(false);
@@ -62,7 +62,7 @@ export function CommandPalette() {
                             onSelect={() => runCommand(() => navigate("/archive"))}
                             className="flex items-center gap-2 px-2 py-2 mt-1 text-sm text-zinc-300 rounded-lg cursor-pointer hover:bg-zinc-800 aria-selected:bg-zinc-800 aria-selected:text-white transition-colors"
                         >
-                            <Archive className="w-4 h-4" /> Archive
+                            <Radio className="w-4 h-4" /> X Spaces
                         </Command.Item>
                         <Command.Item
                             onSelect={() => runCommand(() => navigate("/chat"))}

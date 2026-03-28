@@ -19,7 +19,6 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-import shutil
 from datetime import datetime
 from http.cookiejar import MozillaCookieJar
 from pathlib import Path
@@ -201,7 +200,7 @@ class XSpacesEngine:
 
         m3u8 URL 캡처에 실패했을 때의 fallback — space_id URL로 시도.
         """
-        ytdlp_path = self._resolve_ytdlp_path()
+        ytdlp_path = get_settings().resolve_ytdlp_path()
         space_url = X_SPACES_URL.format(space_id=space_id)
 
         safe_channel = _sanitize_filename(channel_name)
@@ -317,7 +316,7 @@ class XSpacesEngine:
         output_path = Path(output_dir) / filename
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        ytdlp_path = self._resolve_ytdlp_path()
+        ytdlp_path = get_settings().resolve_ytdlp_path()
         cmd = [
             ytdlp_path,
             m3u8_url,
@@ -354,27 +353,6 @@ class XSpacesEngine:
             "state": state,
             "output": str(output_path),
         }
-
-    @staticmethod
-    def _resolve_ytdlp_path() -> str:
-        """yt-dlp 실행 파일 경로를 찾는다."""
-        import sys
-
-        for name in ("yt-dlp", "yt-dlp.exe", "yt_dlp"):
-            path = shutil.which(name)
-            if path:
-                return path
-
-        venv_bin = Path(sys.executable).parent
-        for name in ("yt-dlp", "yt-dlp.exe", "yt_dlp"):
-            candidate = venv_bin / name
-            if candidate.is_file():
-                return str(candidate)
-
-        raise FileNotFoundError(
-            "yt-dlp를 찾을 수 없습니다. "
-            "pip install yt-dlp 또는 시스템 PATH에 yt-dlp를 추가하세요."
-        )
 
     @staticmethod
     def _offline_status(channel_id: str) -> LiveStatus:
