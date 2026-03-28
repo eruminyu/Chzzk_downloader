@@ -78,6 +78,9 @@ scripts/generate_icon.py
 *_cookies.txt
 cookies.txt
 
+# 개발용 임시 실행 스크립트
+*_test.bat
+
 # Pyre 설정
 .pyre_configuration
 
