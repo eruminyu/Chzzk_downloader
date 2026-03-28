@@ -31,8 +31,10 @@ class LiveStatus(TypedDict, total=False):
     profile_image_url: str
     # X Spaces 전용: 녹화에 필요한 space_id
     space_id: Optional[str]
-    # X Spaces 전용: 라이브 중 캡처한 m3u8 URL
+    # X Spaces 전용: 라이브 중 캡처한 dynamic m3u8 URL
     m3u8_url: Optional[str]
+    # X Spaces 전용: master_playlist.m3u8 (쿼리파라미터 없음, 종료 후 ~30일 유효)
+    master_url: Optional[str]
 
 
 @runtime_checkable

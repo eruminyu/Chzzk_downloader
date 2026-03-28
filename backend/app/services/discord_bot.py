@@ -431,14 +431,15 @@ class DiscordBotService:
         # ── Spaces 헬퍼 ──────────────────────────────────────────
 
         def _get_spaces_embed() -> tuple[discord.Embed | None, str | None]:
-            """캡처된 m3u8 목록 Embed를 반환한다."""
+            """캡처된 Space URL 목록 Embed를 반환한다 (master_url 우선)."""
             channels = self._service.get_channels()
             spaces = [
                 ch for ch in channels
-                if ch.get("platform") == "x_spaces" and ch.get("captured_m3u8_url")
+                if ch.get("platform") == "x_spaces"
+                and (ch.get("master_url") or ch.get("captured_m3u8_url"))
             ]
             if not spaces:
-                return None, "📭 캡처된 X Spaces m3u8 URL이 없습니다."
+                return None, "📭 캡처된 X Spaces URL이 없습니다."
 
             embed = discord.Embed(
                 title="🎙️ 캡처된 X Spaces",
@@ -447,12 +448,16 @@ class DiscordBotService:
             for sp in spaces:
                 name = sp.get("channel_name") or sp["channel_id"]
                 title = sp.get("title") or "제목 없음"
-                captured_at = sp.get("captured_m3u8_at", "")[:19].replace("T", " ") if sp.get("captured_m3u8_at") else "N/A"
+                # master_url 우선, 없으면 dynamic m3u8 URL 사용
+                url = sp.get("master_url") or sp.get("captured_m3u8_url", "")
+                captured_at_raw = sp.get("master_url_captured_at") or sp.get("captured_m3u8_at", "")
+                captured_at = captured_at_raw[:19].replace("T", " ") if captured_at_raw else "N/A"
+                url_label = "Master URL" if sp.get("master_url") else "m3u8 URL"
                 embed.add_field(
                     name=f"@{name} — {title}",
                     value=(
                         f"캡처 시각: `{captured_at}`\n"
-                        f"URL: `{sp['captured_m3u8_url']}`\n"
+                        f"{url_label}: `{url}`\n"
                         f"다운로드: `/download-space url:<위 URL>`"
                     ),
                     inline=False,
@@ -460,8 +465,25 @@ class DiscordBotService:
             return embed, None
 
         async def _do_download_space(url: str) -> discord.Embed:
-            """m3u8 URL로 다운로드를 시작하고 결과 Embed를 반환한다."""
+            """Space URL 또는 m3u8 URL로 다운로드를 시작하고 결과 Embed를 반환한다."""
             try:
+                # Space URL (https://x.com/i/spaces/...) 인 경우 새 엔진으로 처리
+                if "/i/spaces/" in url:
+                    result = await self._service.download_space(url)
+                    if "error" in result:
+                        return _make_embed("❌ 다운로드 실패", result["error"], "red")
+                    from app.engine.x_spaces import SPACE_STATE_RUNNING
+                    state_str = "🔴 라이브 중" if result.get("state") == SPACE_STATE_RUNNING else "📼 종료된 Space"
+                    return _make_embed(
+                        "⬇️ Space 다운로드 시작",
+                        f"**{result.get('title', 'X Spaces')}** — {state_str}",
+                        "green",
+                        fields={
+                            "space_id": result.get("space_id", ""),
+                            "저장 경로": result.get("output", "")[-60:],
+                        },
+                    )
+                # 기존 m3u8 URL → VodEngine으로 처리
                 task_id = await self._service.download_vod(url=url)
                 return _make_embed(
                     "⬇️ 다운로드 시작",

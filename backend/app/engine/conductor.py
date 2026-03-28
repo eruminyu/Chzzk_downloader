@@ -49,9 +49,14 @@ class ChannelTask:
     # X Spaces 전용
     spaces_process: Optional[asyncio.subprocess.Process] = field(default=None, repr=False)
     _current_space_id: Optional[str] = None
-    # X Spaces 전용: 라이브 중 캡처한 m3u8 URL (Space 종료 후 다운로드용)
+    # X Spaces 전용: 라이브 중 캡처한 dynamic m3u8 URL
     captured_m3u8_url: Optional[str] = None
-    captured_m3u8_at: Optional[str] = None  # 캡처 시각 (ISO 포맷)
+    captured_m3u8_at: Optional[str] = None
+    # X Spaces 전용: master_playlist.m3u8 (안정적, 종료 후 ~30일 유효)
+    master_url: Optional[str] = None
+    master_url_captured_at: Optional[str] = None
+    # X Spaces 전용: master URL이 저장된 .txt 파일 경로 (녹화 실패 시 백업용)
+    master_url_file: Optional[str] = None
 
 
 class Conductor:
@@ -72,6 +77,8 @@ class Conductor:
 
     # 쿠키 검증 주기 (초) — 하루 1회
     _COOKIE_CHECK_INTERVAL = 86400
+    # X Spaces 폴링 주기 (초) — 레이트 리밋 방어를 위해 5분 간격
+    _X_SPACES_POLL_INTERVAL = 300
 
     def __init__(
         self,
@@ -93,6 +100,8 @@ class Conductor:
         # 라이브 감지 이력: composite_key → 날짜 문자열 set (하루 1회 카운트)
         self._live_detections: dict[str, set[str]] = {}
         self._live_history_path = _data_dir / "live_history.json"
+        # 즉시 스캔 이벤트: composite_key → asyncio.Event
+        self._scan_events: dict[str, asyncio.Event] = {}
         # X 쿠키 유효성 상태
         self._cookie_status: dict = {"valid": True, "checked_at": None, "reason": None}
         self._last_cookie_check: Optional[datetime] = None
@@ -164,6 +173,7 @@ class Conductor:
             auto_record=auto_record,
         )
         self._channels[composite_key] = task
+        self._scan_events[composite_key] = asyncio.Event()
         logger.info(f"채널 등록: {composite_key} (auto_record={auto_record})")
 
         self._save_persistence()
@@ -192,7 +202,7 @@ class Conductor:
         logger.info(f"[{composite_key}] 태그 변경: {tags}")
         self._save_persistence()
 
-    def toggle_auto_record(self, composite_key: str) -> bool:
+    async def toggle_auto_record(self, composite_key: str) -> bool:
         """채널의 자동 녹화 설정을 토글한다.
 
         Returns:
@@ -214,11 +224,25 @@ class Conductor:
             and (task.pipeline is None or task.pipeline.state != RecordingState.RECORDING)
         ):
             logger.info(f"[{composite_key}] 라이브 중 자동 녹화 ON → 즉시 녹화 시작")
-            asyncio.create_task(
-                self._start_recording(composite_key, channel_name=task.channel_name, title=task.title)
-            )
+            await self._start_recording(composite_key, channel_name=task.channel_name, title=task.title)
 
         return task.auto_record
+
+    def trigger_scan_now(self, composite_key: Optional[str] = None) -> None:
+        """채널 폴링 주기를 무시하고 즉시 스캔을 트리거한다.
+
+        Args:
+            composite_key: 특정 채널만 스캔. None이면 모든 채널.
+        """
+        if composite_key:
+            event = self._scan_events.get(composite_key)
+            if event:
+                event.set()
+                logger.info(f"[{composite_key}] 즉시 스캔 요청")
+        else:
+            for key, event in self._scan_events.items():
+                event.set()
+            logger.info(f"전체 채널 즉시 스캔 요청 ({len(self._scan_events)}개)")
 
     async def remove_channel(self, composite_key: str) -> None:
         """채널을 감시 목록에서 제거한다."""
@@ -242,6 +266,7 @@ class Conductor:
         if mt is not None and not mt.done():
             mt.cancel()
 
+        self._scan_events.pop(composite_key, None)
         logger.info(f"채널 제거: {composite_key}")
         self._save_persistence()
 
@@ -379,6 +404,30 @@ class Conductor:
         """X 쿠키 유효성 상태를 반환한다."""
         return dict(self._cookie_status)
 
+    async def download_space(self, space_url: str) -> dict:
+        """Space URL로 직접 다운로드한다.
+
+        채널 등록 없이 space_url만으로 즉시 다운로드 가능.
+        UserTweets API를 사용하지 않으므로 레이트 리밋 문제 없음.
+
+        Args:
+            space_url: X/Twitter Space URL (https://x.com/i/spaces/...)
+
+        Returns:
+            성공: {"started": True, "space_id": ..., "title": ..., "state": ..., "output": ...}
+            실패: {"error": "오류 메시지"}
+        """
+        from app.engine.x_spaces import XSpacesEngine
+
+        engine: XSpacesEngine = self._get_engine(Platform.X_SPACES)
+        settings = get_settings()
+
+        return await engine.download_by_space_url(
+            space_url=space_url,
+            output_dir=settings.download_dir,
+            cookie_file=settings.x_cookie_file,
+        )
+
     async def capture_space(self, username: str) -> dict:
         """X Spaces 채널의 m3u8 URL을 즉시 1회 조회한다.
 
@@ -441,6 +490,9 @@ class Conductor:
                     "auto_record": t.auto_record,
                     "captured_m3u8_url": t.captured_m3u8_url,
                     "captured_m3u8_at": t.captured_m3u8_at,
+                    "master_url": t.master_url,
+                    "master_url_captured_at": t.master_url_captured_at,
+                    "master_url_file": t.master_url_file,
                     "tags": t.tags,
                 }
                 for key, t in self._channels.items()
@@ -512,6 +564,9 @@ class Conductor:
                     if platform.value == "x_spaces":
                         restored_task.captured_m3u8_url = config.get("captured_m3u8_url")
                         restored_task.captured_m3u8_at = config.get("captured_m3u8_at")
+                        restored_task.master_url = config.get("master_url")
+                        restored_task.master_url_captured_at = config.get("master_url_captured_at")
+                        restored_task.master_url_file = config.get("master_url_file")
                     if "tags" in config:
                         restored_task.tags = config.get("tags", [])
 
@@ -529,16 +584,11 @@ class Conductor:
         settings = get_settings()
         task = self._channels.get(composite_key)
 
-        # X Spaces는 비공식 GraphQL API 레이트 리밋 문제로 자동 폴링 비활성화
-        # Discord /capture-space 커맨드로 수동 트리거
+        # X Spaces는 레이트 리밋 방어를 위해 5분 폴링 간격 사용
         if task and task.platform == Platform.X_SPACES:
-            logger.info(
-                f"[{composite_key}] X Spaces 수동 캡처 모드 — "
-                "자동 감시 없음. Discord `/capture-space` 커맨드로 m3u8 URL을 수동으로 캡처하세요."
-            )
-            return
-
-        interval = settings.monitor_interval
+            interval = self._X_SPACES_POLL_INTERVAL
+        else:
+            interval = settings.monitor_interval
         retry_count = 0
         max_retries = settings.max_record_retries
 
@@ -563,38 +613,54 @@ class Conductor:
                 task.thumbnail_url = status.get("thumbnail_url")
                 task.profile_image_url = status.get("profile_image_url")
 
-                # X Spaces: space_id 및 m3u8_url 업데이트
+                # X Spaces: space_id, m3u8_url, master_url 업데이트
                 if task.platform == Platform.X_SPACES:
                     task._current_space_id = status.get("space_id")
-                    # m3u8 URL이 새로 캡처되면 저장 (기존 URL 덮어쓰지 않음 — 더 오래 유효할 수 있음)
+                    new_master = status.get("master_url")
                     new_m3u8 = status.get("m3u8_url")
-                    if new_m3u8 and not task.captured_m3u8_url:
+                    # master URL이 새로 캡처되면 저장 (Space마다 1회)
+                    if new_master and not task.master_url:
+                        now_iso = datetime.now().isoformat()
+                        task.master_url = new_master
+                        task.master_url_captured_at = now_iso
                         task.captured_m3u8_url = new_m3u8
-                        task.captured_m3u8_at = datetime.now().isoformat()
+                        task.captured_m3u8_at = now_iso
+                        # master URL을 파일로 저장 (녹화 실패 시 백업)
+                        task.master_url_file = self._save_master_url_file(
+                            task, new_master, task._current_space_id
+                        )
                         logger.info(
-                            f"[{composite_key}] m3u8 URL 캡처 완료 "
+                            f"[{composite_key}] 🎙️ Space master URL 캡처 완료 "
                             f"(space_id={task._current_space_id})"
                         )
                         self._save_persistence()
-                        # Discord 알림: m3u8 캡처
+                        # Discord 알림: master URL 캡처 + 자동 녹화 상태 안내
                         if self._discord_bot:
                             try:
+                                rec_status = (
+                                    "🔴 자동 녹화 시작됨 (실시간 저장 중)"
+                                    if task.auto_record
+                                    else "⏸️ 자동 녹화 OFF — 아래 URL로 수동 다운로드 가능"
+                                )
+                                file_info = (
+                                    f"`{task.master_url_file}`"
+                                    if task.master_url_file
+                                    else "저장 실패"
+                                )
                                 await self._discord_bot.send_notification(
-                                    title="🎙️ X Spaces m3u8 캡처",
+                                    title="🎙️ X Spaces 감지",
                                     description=(
-                                        f"**{task.channel_name or task.channel_id}**의 "
-                                        f"Space m3u8 URL이 캡처되었습니다.\n"
-                                        f"Space 종료 후 `/download-space` 커맨드로 다운로드하세요."
+                                        f"**@{task.channel_name or task.channel_id}** — "
+                                        f"{task.title or 'X Spaces'}\n{rec_status}"
                                     ),
                                     color="blue",
                                     fields={
-                                        "채널": task.channel_name or task.channel_id,
-                                        "제목": task.title or "N/A",
-                                        "m3u8 URL": new_m3u8,
+                                        "Master URL": new_master,
+                                        "URL 파일": file_info,
                                     },
                                 )
                             except Exception as e:
-                                logger.error(f"[{composite_key}] m3u8 캡처 Discord 알림 전송 실패: {e}")
+                                logger.error(f"[{composite_key}] Space 감지 Discord 알림 전송 실패: {e}")
 
                 # ── 라이브 감지 날짜 기록 (하루 1회, 날짜 경계 자동 처리) ──
                 if status["is_live"]:
@@ -618,6 +684,16 @@ class Conductor:
                 # ── 방송 종료 감지 ──
                 elif not status["is_live"] and was_live:
                     logger.info(f"[{composite_key}] ⚫ 방송 종료 감지.")
+                    # X Spaces: 다음 Space를 위해 master_url 초기화
+                    if task.platform == Platform.X_SPACES:
+                        task.master_url = None
+                        task.master_url_captured_at = None
+                        task.captured_m3u8_url = None
+                        task.captured_m3u8_at = None
+                        task.master_url_file = None
+                        task._current_space_id = None
+                        self._save_persistence()
+                        logger.info(f"[{composite_key}] 🎙️ Space 종료 — master URL 초기화 완료.")
                     await self._stop_recording(composite_key)
                     retry_count = 0
 
@@ -678,7 +754,16 @@ class Conductor:
                 task.last_error = f"감시 오류: {str(e)}"
                 logger.error(f"[{composite_key}] 감시 오류: {e}", exc_info=e)
 
-            await asyncio.sleep(interval)
+            # 폴링 대기 — 즉시 스캔 요청(trigger_scan_now) 시 event로 깨어남
+            scan_event = self._scan_events.get(composite_key)
+            if scan_event is not None:
+                scan_event.clear()
+                try:
+                    await asyncio.wait_for(scan_event.wait(), timeout=float(interval))
+                except asyncio.TimeoutError:
+                    pass
+            else:
+                await asyncio.sleep(interval)
 
     async def _stop_recording(self, composite_key: str) -> None:
         """채널의 녹화 및 채팅 아카이빙을 중지한다."""
@@ -864,6 +949,47 @@ class Conductor:
         # 녹화 시작/실패 후 프론트엔드에 즉시 상태 업데이트
         self.broadcast_event("status_update", self.get_all_status())
 
+    def _save_master_url_file(
+        self,
+        task: "ChannelTask",
+        master_url: str,
+        space_id: Optional[str],
+    ) -> Optional[str]:
+        """master URL을 .txt 파일로 저장하고 파일 경로를 반환한다.
+
+        녹화가 실패하더라도 나중에 수동으로 다운로드할 수 있도록 백업용으로 저장한다.
+        저장 위치: {download_dir}/x_spaces_urls/{channel}_{space_id}_{datetime}.txt
+        """
+        try:
+            settings = get_settings()
+            now_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+            channel_name = task.channel_name or task.channel_id
+            safe_name = "".join(c for c in channel_name if c.isalnum() or c in "-_@")
+            sid = (space_id or "unknown")[:20]
+            filename = f"{safe_name}_{sid}_{now_str}.txt"
+
+            url_dir = Path(settings.download_dir) / "x_spaces_urls"
+            url_dir.mkdir(parents=True, exist_ok=True)
+            file_path = url_dir / filename
+
+            content = (
+                f"X Spaces Master URL\n"
+                f"{'=' * 50}\n"
+                f"채널: @{channel_name}\n"
+                f"제목: {task.title or 'N/A'}\n"
+                f"Space ID: {space_id or 'unknown'}\n"
+                f"캡처 시각: {now_str}\n"
+                f"\nMaster URL (안정적, ~30일 유효):\n{master_url}\n"
+                f"\n다운로드 방법:\n"
+                f"  yt-dlp \"{master_url}\" -o \"{channel_name}_%(title)s.%(ext)s\"\n"
+            )
+            file_path.write_text(content, encoding="utf-8")
+            logger.info(f"[{task.channel_id}] 🗂️ Master URL 파일 저장: {file_path}")
+            return str(file_path)
+        except Exception as e:
+            logger.error(f"[{task.channel_id}] Master URL 파일 저장 실패: {e}")
+            return None
+
     async def _stop_spaces_recording(self, composite_key: str) -> None:
         """X Spaces yt-dlp 프로세스를 종료한다."""
         task = self._channels.get(composite_key)
@@ -988,8 +1114,11 @@ class Conductor:
                     "space_id": task._current_space_id,
                 }
 
-            # X Spaces m3u8 캡처 정보
+            # X Spaces URL 캡처 정보
             if task.platform == Platform.X_SPACES:
+                status["master_url"] = task.master_url
+                status["master_url_captured_at"] = task.master_url_captured_at
+                status["master_url_file"] = task.master_url_file
                 status["captured_m3u8_url"] = task.captured_m3u8_url
                 status["captured_m3u8_at"] = task.captured_m3u8_at
 

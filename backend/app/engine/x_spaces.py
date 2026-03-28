@@ -16,6 +16,7 @@ Chzzk-Recorder-Pro: X Spaces 엔진
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import shutil
@@ -40,9 +41,20 @@ _BEARER_TOKEN = (
 )
 
 # GraphQL QUERY_ID — X 배포마다 변경될 수 있음
-# twspace-dl 및 yt-dlp 소스에서 최신값 확인 가능
+# 최신값 확인: yt-dlp/yt-dlp twitter.py, trevorhobenshield/twitter-api-client constants.py
 _AUDIO_SPACE_BY_ID_QUERY_ID = "HPEisOmj1epUNLCWTYhUWw"
-_USER_BY_SCREEN_NAME_QUERY_ID = "G3KGOASz96M-Qu0nwmGXNg"
+_USER_BY_SCREEN_NAME_QUERY_ID = "oUZZZ8Oddwxs8Cd3iW3UEA"
+# AudioSpaceSearch는 X API deprecated — UserTweets 방식으로 탐색
+_USER_TWEETS_QUERY_IDS = [
+    "rIIwMe1ObkGh_ByBtTCtRQ",  # 최신 (twspace-crawler 2023.07 기준)
+    "V7H0Ap3_Hh2FyS75OCDO3Q",  # 구버전 fallback
+    "CdG2Vuc1v6F5JyEngGpxVw",  # 구버전 fallback 2
+]
+
+# Space 상태값 (AudioSpaceById 응답의 metadata.state)
+SPACE_STATE_RUNNING = "Running"
+SPACE_STATE_ENDED = "Ended"
+SPACE_STATE_NOT_STARTED = "NotStarted"
 
 
 class XSpacesEngine:
@@ -64,6 +76,9 @@ class XSpacesEngine:
             LiveStatus 딕셔너리.
             is_live=True 시 space_id와 m3u8_url 포함.
         """
+        # "@username" 형태로 입력해도 정상 처리
+        channel_id = channel_id.lstrip("@")
+
         settings = get_settings()
         cookie_file = settings.x_cookie_file
 
@@ -89,32 +104,47 @@ class XSpacesEngine:
                 timeout=15.0,
                 follow_redirects=True,
             ) as client:
-                # 1단계: username → user_id
+                # 1단계: UserByScreenName으로 user_id 조회
                 user_id = await _get_user_id(client, channel_id)
                 if user_id is None:
-                    logger.warning(f"[XSpaces:{channel_id}] user_id 조회 실패.")
+                    logger.warning(f"[XSpaces:{channel_id}] user_id 조회 실패 (쿠키 만료 또는 존재하지 않는 계정).")
                     return self._offline_status(channel_id)
 
-                logger.info(f"[XSpaces:{channel_id}] user_id 조회 성공: {user_id}")
-
-                # 2단계: 활성 Space 조회
+                # 2단계: UserTweets 타임라인에서 활성 Space 탐색
                 space_info = await _get_active_space(client, user_id, channel_id)
                 if space_info is None:
                     logger.info(f"[XSpaces:{channel_id}] 활성 Space 없음 (오프라인).")
                     return self._offline_status(channel_id)
-
                 space_id = space_info["space_id"]
-                title = space_info["title"]
-                media_key = space_info.get("media_key")
 
-                # 3단계: m3u8 URL 캡처
+                # 3단계: AudioSpaceById로 media_key + title 조회
+                space_meta = await get_space_by_id(client, space_id)
+                if space_meta is None:
+                    logger.warning(f"[XSpaces:{channel_id}] Space 메타데이터 조회 실패: {space_id}")
+                    return self._offline_status(channel_id)
+
+                # state가 Running이 아니면 오프라인 처리 (종료된 Space가 타임라인에 남아있는 경우 대비)
+                if space_meta["state"] != SPACE_STATE_RUNNING:
+                    logger.info(
+                        f"[XSpaces:{channel_id}] Space 종료됨 "
+                        f"(state={space_meta['state']}, space_id={space_id})"
+                    )
+                    return self._offline_status(channel_id)
+
+                title = space_meta["title"]
+                media_key = space_meta["media_key"]
+
+                # 4단계: m3u8 URL 캡처 + master URL 유도
                 m3u8_url: Optional[str] = None
+                master_url: Optional[str] = None
                 if media_key:
                     m3u8_url = await _get_m3u8_url(client, media_key, channel_id)
+                    if m3u8_url:
+                        master_url = _derive_master_url(m3u8_url)
 
                 logger.info(
                     f"[XSpaces:{channel_id}] 라이브 Space 감지: {space_id} — {title}"
-                    + (f" (m3u8 캡처 완료)" if m3u8_url else " (m3u8 캡처 실패)")
+                    + (" (master URL 캡처 완료)" if master_url else " (m3u8 캡처 실패)")
                 )
 
                 return LiveStatus(
@@ -128,6 +158,7 @@ class XSpacesEngine:
                     profile_image_url="",
                     space_id=space_id,
                     m3u8_url=m3u8_url,
+                    master_url=master_url,
                 )
 
         except httpx.HTTPStatusError as e:
@@ -170,8 +201,6 @@ class XSpacesEngine:
 
         m3u8 URL 캡처에 실패했을 때의 fallback — space_id URL로 시도.
         """
-        import asyncio
-
         ytdlp_path = self._resolve_ytdlp_path()
         space_url = X_SPACES_URL.format(space_id=space_id)
 
@@ -205,6 +234,126 @@ class XSpacesEngine:
             stderr=asyncio.subprocess.PIPE,
         )
         return process
+
+    async def download_by_space_url(
+        self,
+        space_url: str,
+        output_dir: str,
+        cookie_file: Optional[str] = None,
+    ) -> dict:
+        """Space URL로 직접 다운로드한다.
+
+        UserTweets API를 사용하지 않고 space_id → AudioSpaceById → m3u8 → yt-dlp 흐름으로 처리.
+        라이브 중인 Space와 종료된 Space(약 30일 이내) 모두 지원.
+
+        Args:
+            space_url: X/Twitter Space URL.
+                       예: https://x.com/i/spaces/1BdGYyg...
+                       또는 https://twitter.com/i/spaces/1BdGYyg...
+            output_dir: 다운로드 저장 디렉토리.
+            cookie_file: Netscape 형식 쿠키 파일 경로. None이면 설정에서 가져옴.
+
+        Returns:
+            성공: {"started": True, "space_id": ..., "title": ..., "state": ..., "output": ...}
+            실패: {"error": "오류 메시지"}
+        """
+        # 1. space_id 추출
+        match = re.search(r"/spaces/([A-Za-z0-9]+)", space_url)
+        if not match:
+            return {"error": f"Space URL에서 space_id를 추출할 수 없습니다: {space_url}"}
+        space_id = match.group(1)
+
+        # 2. 쿠키 로드
+        cookie_file_path = cookie_file or get_settings().x_cookie_file
+        if not cookie_file_path or not Path(cookie_file_path).is_file():
+            return {"error": "X 쿠키 파일이 설정되지 않았습니다. 설정 페이지에서 쿠키 파일을 업로드해주세요."}
+
+        cookies = _parse_netscape_cookies(cookie_file_path)
+        if not cookies.get("auth_token") or not cookies.get("ct0"):
+            return {"error": "쿠키 파일에서 auth_token/ct0를 찾을 수 없습니다. 쿠키 파일을 다시 추출해주세요."}
+
+        headers = _build_headers(cookies["ct0"])
+
+        try:
+            async with httpx.AsyncClient(
+                cookies=cookies,
+                headers=headers,
+                timeout=15.0,
+                follow_redirects=True,
+            ) as client:
+                # 3. AudioSpaceById로 Space 메타데이터 조회
+                space_info = await get_space_by_id(client, space_id)
+                if space_info is None:
+                    return {"error": f"Space 정보를 가져올 수 없습니다. space_id={space_id} — 쿠키 만료 또는 비공개 Space일 수 있습니다."}
+
+                state = space_info["state"]
+                media_key = space_info["media_key"]
+                title = space_info["title"]
+
+                if state == SPACE_STATE_NOT_STARTED:
+                    return {"error": f"Space가 아직 시작되지 않았습니다: {title}"}
+
+                if not media_key:
+                    return {"error": f"media_key를 가져올 수 없습니다 (state={state}). 종료 후 시간이 너무 지났을 수 있습니다."}
+
+                # 4. m3u8 URL 조회
+                m3u8_url = await _get_m3u8_url(client, media_key, space_id)
+                if not m3u8_url:
+                    return {"error": "m3u8 URL을 가져올 수 없습니다. 종료된 지 오래된 Space이거나 비공개 Space일 수 있습니다."}
+
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 401:
+                return {"error": "X 쿠키가 만료되었습니다. 브라우저에서 쿠키를 다시 추출해주세요."}
+            return {"error": f"X API 오류 (HTTP {e.response.status_code})"}
+        except Exception as e:
+            logger.error(f"[XSpaces] Space 정보 조회 실패 (space_id={space_id}): {e}", exc_info=e)
+            return {"error": str(e)}
+
+        # 5. yt-dlp subprocess로 다운로드 시작 (start_ytdlp_recording과 동일 패턴)
+        safe_title = _sanitize_filename(title)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"[XSpaces] {safe_title}_{timestamp}.m4a"
+
+        output_path = Path(output_dir) / filename
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        ytdlp_path = self._resolve_ytdlp_path()
+        cmd = [
+            ytdlp_path,
+            m3u8_url,
+            "--output", str(output_path),
+            "--format", "bestaudio",
+            "--no-progress",
+            "--quiet",
+        ]
+        if cookie_file_path:
+            cmd.extend(["--cookies", cookie_file_path])
+
+        logger.info(f"[XSpaces] 다운로드 시작: {title} ({state}) → {output_path}")
+
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+
+        async def _wait_and_log() -> None:
+            _, stderr = await process.communicate()
+            if process.returncode == 0:
+                logger.info(f"[XSpaces] 다운로드 완료: {output_path}")
+            else:
+                err_msg = stderr.decode(errors="replace").strip()[:300]
+                logger.error(f"[XSpaces] 다운로드 실패 (exit={process.returncode}): {err_msg}")
+
+        asyncio.create_task(_wait_and_log())
+
+        return {
+            "started": True,
+            "space_id": space_id,
+            "title": title,
+            "state": state,
+            "output": str(output_path),
+        }
 
     @staticmethod
     def _resolve_ytdlp_path() -> str:
@@ -367,12 +516,7 @@ async def _get_active_space(
     })
 
     # 여러 QUERY_ID 후보를 순서대로 시도 (X 배포마다 변경되므로)
-    query_ids = [
-        "V7H0Ap3_Hh2FyS75OCDO3Q",  # UserTweets (최신 추정)
-        "CdG2Vuc1v6F5JyEngGpxVw",  # UserTweets (구버전)
-    ]
-
-    for qid in query_ids:
+    for qid in _USER_TWEETS_QUERY_IDS:
         try:
             resp = await client.get(
                 f"https://twitter.com/i/api/graphql/{qid}/UserTweets",
@@ -385,7 +529,8 @@ async def _get_active_space(
             space_info = _extract_space_from_timeline(data)
             if space_info:
                 return space_info
-            # 응답은 왔지만 Space 없음 → 오프라인
+            # 응답은 왔지만 Space 없음 → 오프라인 (qid 성공 확인용 디버그 로그)
+            logger.debug(f"[XSpaces:{username}] UserTweets 성공 (qid={qid}) — Space 없음 또는 파싱 실패")
             return None
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 429:
@@ -402,8 +547,24 @@ async def _get_active_space(
     return None
 
 
+def _extract_space_id_from_url(url: str) -> Optional[str]:
+    """URL에서 space_id를 추출한다. /i/spaces/{id} 패턴."""
+    if "/i/spaces/" not in url:
+        return None
+    try:
+        return url.rstrip("/").split("/i/spaces/")[1].split("?")[0].split("/")[0]
+    except IndexError:
+        return None
+
+
 def _extract_space_from_timeline(data: dict) -> Optional[dict]:
-    """UserTweets GraphQL 응답에서 활성 Space 정보를 추출한다."""
+    """UserTweets GraphQL 응답에서 활성 Space 정보를 추출한다.
+
+    탐색 순서:
+    1. tweet.legacy.entities.urls[].expanded_url (가장 안정적)
+    2. card.legacy.binding_values list 형식 (구버전 호환)
+    3. card.legacy.binding_values dict 형식 (신버전)
+    """
     try:
         instructions = (
             data.get("data", {})
@@ -421,26 +582,117 @@ def _extract_space_from_timeline(data: dict) -> Optional[dict]:
                     .get("tweet_results", {})
                     .get("result", {})
                 )
-                card = tweet_result.get("card", {})
-                legacy = card.get("legacy", {})
-                binding_values = legacy.get("binding_values", [])
+                if not tweet_result:
+                    continue
 
-                for bv in binding_values:
-                    if bv.get("key") == "card_url":
-                        url = bv.get("value", {}).get("scribe_value", {}).get("value", "")
-                        if not url:
-                            url = bv.get("value", {}).get("string_value", "")
-                        if "/i/spaces/" in url:
-                            space_id = url.rstrip("/").split("/i/spaces/")[1].split("?")[0].split("/")[0]
-                            title = ""
-                            for b in binding_values:
-                                if b.get("key") == "title":
-                                    title = b.get("value", {}).get("string_value", "")
-                                    break
-                            return {"space_id": space_id, "title": title or "X Spaces", "media_key": None}
+                tweet_legacy = tweet_result.get("legacy", {})
+
+                # 방법 1: entities.urls (가장 안정적)
+                for url_entity in tweet_legacy.get("entities", {}).get("urls", []):
+                    for key in ("expanded_url", "url", "display_url"):
+                        space_id = _extract_space_id_from_url(url_entity.get(key, ""))
+                        if space_id:
+                            return {"space_id": space_id, "title": "X Spaces", "media_key": None}
+
+                # 방법 2: card.legacy.binding_values (list 형식)
+                card = tweet_result.get("card", {})
+                card_legacy = card.get("legacy", {})
+                binding_values = card_legacy.get("binding_values", [])
+
+                if isinstance(binding_values, list):
+                    title = ""
+                    space_id = None
+                    for bv in binding_values:
+                        key = bv.get("key", "")
+                        val = bv.get("value", {})
+                        if key == "card_url":
+                            url = val.get("scribe_value", {}).get("value", "") or val.get("string_value", "")
+                            space_id = _extract_space_id_from_url(url)
+                        elif key == "title":
+                            title = val.get("string_value", "")
+                    if space_id:
+                        return {"space_id": space_id, "title": title or "X Spaces", "media_key": None}
+
+                elif isinstance(binding_values, dict):
+                    # 방법 3: binding_values dict 형식 (신버전)
+                    card_url_obj = binding_values.get("card_url", {})
+                    url = card_url_obj.get("string_value", "")
+                    space_id = _extract_space_id_from_url(url)
+                    if space_id:
+                        title = binding_values.get("title", {}).get("string_value", "X Spaces")
+                        return {"space_id": space_id, "title": title, "media_key": None}
+
     except Exception:
         pass
     return None
+
+
+async def _get_active_space_by_search(
+    client: httpx.AsyncClient,
+    username: str,
+) -> Optional[str]:
+    """AudioSpaceSearch GraphQL로 특정 사용자의 라이브 Space를 탐색한다.
+
+    UserTweets(QUERY_ID 만료) 대신 사용하는 안정적인 탐색 방식.
+
+    Returns:
+        space_id 문자열 또는 None (Space 없음 또는 API 실패).
+    """
+    variables = json.dumps({
+        "rawQuery": f"from:{username}",
+        "count": 5,
+        "product": "Audio",
+    })
+
+    try:
+        resp = await client.get(
+            f"https://twitter.com/i/api/graphql/{_AUDIO_SPACE_SEARCH_QUERY_ID}/AudioSpaceSearch",
+            params={"variables": variables},
+        )
+        if resp.status_code in (400, 404):
+            logger.warning(
+                f"[XSpaces:{username}] AudioSpaceSearch QUERY_ID 만료 또는 미지원 "
+                f"(HTTP {resp.status_code}). x_spaces.py의 _AUDIO_SPACE_SEARCH_QUERY_ID를 업데이트하세요."
+            )
+            return None
+        resp.raise_for_status()
+        data = resp.json()
+        spaces = (
+            data.get("data", {})
+            .get("search_by_raw_query", {})
+            .get("audio_spaces", {})
+            .get("spaces", [])
+        )
+        for space in spaces:
+            metadata = space.get("metadata", {})
+            if metadata.get("state") == SPACE_STATE_RUNNING:
+                space_id = space.get("rest_id") or metadata.get("rest_id")
+                if space_id:
+                    return space_id
+        return None
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 429:
+            logger.warning(f"[XSpaces:{username}] AudioSpaceSearch 레이트 리밋 (429).")
+        else:
+            logger.warning(f"[XSpaces:{username}] AudioSpaceSearch HTTP 오류: {e.response.status_code}")
+        return None
+    except Exception as e:
+        logger.debug(f"[XSpaces:{username}] AudioSpaceSearch 실패: {e}")
+        return None
+
+
+def _derive_master_url(dynamic_url: str) -> str:
+    """dynamic_playlist.m3u8 URL에서 master_playlist.m3u8 URL을 유도한다.
+
+    master URL은 쿼리파라미터 없이 안정적 — 종료 후 약 30일간 유효.
+
+    Args:
+        dynamic_url: live_video_stream에서 반환된 dynamic_playlist.m3u8?token=... URL.
+
+    Returns:
+        master_playlist.m3u8 URL (쿼리파라미터 제거).
+    """
+    return dynamic_url.split("?")[0].replace("dynamic_playlist", "master_playlist")
 
 
 async def get_space_by_id(
@@ -547,9 +799,27 @@ async def verify_cookie(cookie_file: str) -> dict:
             timeout=10.0,
             follow_redirects=True,
         ) as client:
+            # account/verify_credentials.json은 deprecated → UserByScreenName으로 대체
+            variables = json.dumps({
+                "screen_name": "x",
+                "withSafetyModeUserFields": True,
+            })
+            features = json.dumps({
+                "hidden_profile_likes_enabled": True,
+                "hidden_profile_subscriptions_enabled": True,
+                "responsive_web_graphql_exclude_directive_enabled": True,
+                "verified_phone_label_enabled": False,
+                "subscriptions_verification_info_is_identity_verified_enabled": True,
+                "subscriptions_verification_info_verified_since_enabled": True,
+                "highlights_tweets_tab_ui_enabled": True,
+                "responsive_web_twitter_article_notes_tab_enabled": False,
+                "creator_subscriptions_tweet_preview_api_enabled": True,
+                "responsive_web_graphql_skip_user_profile_image_extensions_enabled": False,
+                "responsive_web_graphql_timeline_navigation_enabled": True,
+            })
             resp = await client.get(
-                "https://api.twitter.com/1.1/account/verify_credentials.json",
-                params={"skip_status": "true", "include_entities": "false"},
+                f"https://twitter.com/i/api/graphql/{_USER_BY_SCREEN_NAME_QUERY_ID}/UserByScreenName",
+                params={"variables": variables, "features": features},
             )
             if resp.status_code == 200:
                 return {"valid": True, "checked_at": checked_at, "reason": None}
