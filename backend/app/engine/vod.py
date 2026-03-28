@@ -123,6 +123,10 @@ class VodEngine:
         """치지직 URL인지 확인."""
         return "chzzk.naver.com" in url
 
+    def _is_x_spaces_url(self, url: str) -> bool:
+        """X Spaces / Periscope CDN URL인지 확인."""
+        return "pscp.tv" in url or "video.pscp.tv" in url or "x.com/i/spaces" in url
+
     def _build_ytdlp_options(
         self,
         task: VodDownloadTask,
@@ -156,6 +160,13 @@ class VodEngine:
                         "Chrome/131.0.0.0 Safari/537.36"
                     ),
                 }
+
+        # X Spaces / Periscope CDN URL인 경우 오디오 전용 포맷 강제
+        # pscp.tv는 오디오 전용 HLS — "best"로 요청하면 video+audio 조합 포맷을 찾다가
+        # 빈 파일 반환. "bestaudio/best"로 오버라이드해야 정상 다운로드됨.
+        if self._is_x_spaces_url(task.url):
+            opts["format"] = "bestaudio/best"
+            logger.debug(f"[{task.task_id}] X Spaces URL 감지 → format=bestaudio/best 오버라이드")
 
         # 진행률 콜백
         if progress_callback:
