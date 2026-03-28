@@ -375,6 +375,17 @@ class DiscordBotService:
 
         # ── X Spaces 전용 커맨드 ────────────────────────────
 
+        @bot.command(name="rescan")
+        async def cmd_rescan(ctx: commands.Context) -> None:
+            """전체 채널 즉시 스캔: !rescan."""
+            self._service.scan_now()
+            await ctx.send("🔍 전체 채널 즉시 스캔을 시작했습니다.")
+
+        @bot.tree.command(name="rescan", description="설정된 폴링 주기를 무시하고 모든 채널을 즉시 스캔합니다")
+        async def slash_rescan(interaction: discord.Interaction) -> None:
+            self._service.scan_now()
+            await interaction.response.send_message("🔍 전체 채널 즉시 스캔을 시작했습니다.")
+
         @bot.command(name="spaces")
         async def cmd_spaces(ctx: commands.Context) -> None:
             """캡처된 X Spaces m3u8 목록: !spaces."""
