@@ -23,7 +23,7 @@ curl -fsSL https://raw.githubusercontent.com/eruminyu/Chzzk_downloader/main/scri
 
 **자동으로 처리되는 것들:**
 - ✅ Ubuntu/Debian/CentOS/Fedora/Arch OS 자동 감지
-- ✅ Python 3.12, ffmpeg, Node.js, streamlink 자동 설치
+- ✅ Python 3.12, ffmpeg, Node.js 자동 설치
 - ✅ 프론트엔드 빌드 (React → 정적 파일)
 - ✅ Python 가상환경(.venv) 생성 및 의존성 설치
 - ✅ systemd 서비스 등록 (선택, 부팅 시 자동 실행)
@@ -62,9 +62,6 @@ curl -fsSL https://raw.githubusercontent.com/eruminyu/Chzzk_downloader/main/scri
 # Ubuntu/Debian 기준
 sudo apt-get update
 sudo apt-get install -y python3.12 python3.12-venv ffmpeg git
-
-# streamlink은 pip으로 설치
-pip3 install streamlink
 ```
 
 ### 설치

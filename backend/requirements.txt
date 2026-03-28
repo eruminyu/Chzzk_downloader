@@ -9,6 +9,3 @@ python-dotenv
 pydantic-settings
 chzzkpy
 discord.py
-# Windows 데스크톱 모드 (트레이 아이콘)
-pystray
-Pillow
