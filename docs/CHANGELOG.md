@@ -9,7 +9,29 @@
 ## [Unreleased]
 
 ### Added
-- 추후 개발될 기능 목록
+- **즉시 스캔 버튼**: Dashboard에 「즉시 스캔」 버튼 추가 (파란색, RefreshCw 아이콘)
+  - `POST /api/platforms/scan-now` 신규 엔드포인트
+  - 폴링 주기 무시하고 전체 또는 특정 채널 즉시 상태 확인
+- **X Spaces master URL 파일 저장** (녹화 실패 대비 백업)
+  - Space 감지 시 master URL을 `.txt` 파일로 저장 (`{download_dir}/x_spaces_urls/`)
+  - 파일에 yt-dlp 다운로드 명령어 포함 — 자동 녹화 실패 시 수동 다운로드 가능
+  - `ChannelTask.master_url_file` 필드 추가 (persistence 저장/복원 포함)
+- **X Spaces Discord 알림 개선**
+  - `auto_record=ON`: "🔴 자동 녹화 시작됨 (실시간 저장 중)"
+  - `auto_record=OFF`: "⏸️ 자동 녹화 OFF — 아래 URL로 수동 다운로드 가능"
+  - Discord `/download-space` 커맨드에 Space URL (`https://x.com/i/spaces/...`) 직접 입력 지원
+  - `_get_spaces_embed()`: `master_url` 우선 표시 (없으면 dynamic m3u8 URL 폴백)
+- **`download_space(space_url)` 서비스 메서드**: 채널 등록 없이 Space URL로 직접 다운로드
+- **`auth.py` `get_streamlink_options()`**: Streamlink 쿠키 주입 헬퍼 메서드
+
+### Fixed
+- **X Spaces 종료 감지 버그**: `AudioSpaceById` `state` 미검사로 종료된 Space가 `is_live=True` 유지되던 문제
+  - UserTweets 타임라인에 종료 Space가 남아 있어 space_id가 계속 발견되던 근본 원인
+  - `state != "Running"` 이면 즉시 `_offline_status()` 반환
+  - `.part` 파일 잔류 문제 해결 (5분 이내 폴링에서 종료 감지 → yt-dlp 프로세스 종료)
+- **X Spaces 다음 Space master URL 미캡처**: Space 종료 감지 시 `master_url` 등 X Spaces 전용 필드 전체 초기화
+  - 미초기화로 인해 `if new_master and not task.master_url:` 조건이 항상 False
+- **`toggle_auto_record()` async 누락**: Conductor → RecorderService → API 라우터 전 계층 `await` 누락 수정
 
 ---
 

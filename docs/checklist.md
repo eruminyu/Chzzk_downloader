@@ -1,5 +1,51 @@
 # Chzzk-Recorder-Pro 개발 체크리스트
 
+## 2026-03-28: X Spaces 종료 감지 버그 수정 + master URL 파일 저장
+
+### 배경
+- `.part` 파일 잔류: Space 종료 후에도 yt-dlp 프로세스가 계속 실행
+- 근본 원인: `check_live_status()`가 `AudioSpaceById` `state` 필드를 전혀 검사하지 않음
+- UserTweets 타임라인에 종료된 Space도 한동안 남아있어 space_id가 계속 발견 → `is_live=True`
+
+### 버그 수정
+- [x] `x_spaces.py`: `get_space_by_id()` 호출 후 `state != SPACE_STATE_RUNNING` 이면 `_offline_status()` 반환
+- [x] `conductor.py`: Space 종료 감지 시 `master_url`, `captured_m3u8_url`, `master_url_file`, `_current_space_id` 등 전체 초기화
+  - 미초기화 시 다음 Space의 master URL 캡처 불가 (`if new_master and not task.master_url:` 항상 False)
+- [x] `base.py`: `LiveStatus`에 `master_url: Optional[str]` 필드 추가
+
+### 신규 기능: master URL 파일 저장
+- [x] `conductor.py`: `_save_master_url_file()` 메서드 추가
+  - 저장 위치: `{download_dir}/x_spaces_urls/{channel}_{space_id}_{datetime}.txt`
+  - 파일 내용: 채널명, 제목, Space ID, 캡처 시각, master URL, yt-dlp 명령어
+- [x] `ChannelTask`: `master_url_file: Optional[str] = None` 필드 추가
+- [x] `_save_persistence()` / `_load_persistence()`: `master_url_file` 저장/복원 포함
+
+### Discord 알림 개선
+- [x] `conductor.py`: Space 감지 알림 — `auto_record` 상태 반영
+  - ON: "🔴 자동 녹화 시작됨 (실시간 저장 중)"
+  - OFF: "⏸️ 자동 녹화 OFF — 아래 URL로 수동 다운로드 가능"
+  - fields에 Master URL + 저장된 파일 경로 표시
+- [x] `discord_bot.py`: `_get_spaces_embed()` — `master_url` 우선 표시
+- [x] `discord_bot.py`: `/download-space` — Space URL (`/i/spaces/`) 직접 입력 지원
+
+### 검증
+- [x] `pytest tests/` 77 passed, 29 skipped
+
+---
+
+## 2026-03-28: 즉시 스캔 버튼 + async 수정 + download_space 서비스
+
+- [x] `platforms.py` (API): `POST /platforms/scan-now` 엔드포인트 추가, `toggle_auto_record` `await` 추가
+- [x] `stream.py` (API): `toggle_auto_record` `await` 추가
+- [x] `recorder.py`: `toggle_auto_record()` async 변환, `scan_now()` 메서드 추가, `download_space()` 메서드 추가
+- [x] `setup.py`: `output_format` → `live_format` 필드명 일관성 수정
+- [x] `auth.py`: `get_streamlink_options()` 헬퍼 추가 (Streamlink 쿠키 주입)
+- [x] `test_conductor.py`: `toggle_auto_record` 관련 테스트 `@pytest.mark.asyncio` + `async` 변환
+- [x] `client.ts`: `scanNow()` API 함수 추가
+- [x] `Dashboard.tsx`: 「즉시 스캔」 버튼 추가 (파란색, RefreshCw 아이콘)
+
+---
+
 ## 2026-03-27: FFmpeg 버전 조건부 호환성 처리
 
 ### 배경
