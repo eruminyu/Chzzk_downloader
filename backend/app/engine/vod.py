@@ -424,10 +424,24 @@ class VodEngine:
                 data = resp.json()
 
             content = data.get("content") or {}
-            video_id = content.get("videoId") or content.get("videoNo")
+            logger.debug(f"[{task_id}] 클립 API 응답 content 키: {list(content.keys())}")
+
+            # videoNo (순수 숫자 ID) 우선 사용 — yt-dlp chzzk:video 익스트랙터의
+            # _VALID_URL 패턴이 `\d+` (숫자만)이기 때문에 해시 형태의 videoId를 쓰면
+            # 앞 숫자 부분만 잘려 404 오류 발생
+            video_no = content.get("videoNo")
+            if video_no:
+                video_url = f"https://chzzk.naver.com/video/{video_no}"
+                logger.info(f"[{task_id}] 클립 URL 변환 (videoNo): {clip_url} → {video_url}")
+                return video_url
+
+            # videoNo가 없을 때만 videoId(해시) 시도
+            video_id = content.get("videoId")
             if video_id:
                 video_url = f"https://chzzk.naver.com/video/{video_id}"
-                logger.info(f"[{task_id}] 클립 URL 변환: {clip_url} → {video_url}")
+                logger.warning(
+                    f"[{task_id}] 클립 URL 변환 (videoId 해시 사용 — 실패 가능): {clip_url} → {video_url}"
+                )
                 return video_url
 
         except Exception as e:
