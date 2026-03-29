@@ -425,17 +425,20 @@ class VodEngine:
             data = resp.json()
 
         content = data.get("content") or {}
-        logger.info(f"[{task_id}] 클립 API 응답 키: {list(content.keys())}")
 
-        # 제목 설정
-        clip_meta = content.get("clip") or {}
-        clip_title = (
-            clip_meta.get("clipTitle")
-            or clip_meta.get("videoTitle")
-            or content.get("clipTitle")
-            or "Unknown Clip"
-        )
-        task.title = f"[Clip] {clip_title}"
+        # 클립 제목 · 채널명 추출
+        clip_title = content.get("contentTitle") or "Unknown Clip"
+        owner = content.get("ownerChannel") or {}
+        channel_name = owner.get("channelName") or "Unknown"
+
+        # 파일명에 쓸 수 없는 문자 제거
+        def _sanitize(s: str) -> str:
+            return re.sub(r'[\\/:*?"<>|]', "_", s).strip()
+
+        safe_title = _sanitize(clip_title)
+        safe_channel = _sanitize(channel_name)
+        task.title = f"[{safe_channel}] {safe_title}"
+        logger.info(f"[{task_id}] 클립 메타: channel={channel_name!r}, title={clip_title!r}")
 
         # 방법 1: ABR_HLS (videoId 해시 + inKey → MPD URL)
         video_id = content.get("videoId")
@@ -448,6 +451,8 @@ class VodEngine:
             logger.info(f"[{task_id}] 클립 ABR_HLS 재생 URL 사용: {playback_url[:80]}...")
             task.url = playback_url
             await self._download_external(task_id, task)
+            # _download_external이 task.title을 yt-dlp 메타로 덮어쓰므로 복원
+            self._rename_clip_output(task_id, task, safe_channel, safe_title)
             return
 
         # 방법 2: HLS (liveRewindPlaybackJson 또는 playbackJson)
@@ -465,12 +470,33 @@ class VodEngine:
                     logger.info(f"[{task_id}] 클립 HLS URL 사용 ({json_key}): {hls_path[:80]}...")
                     task.url = hls_path
                     await self._download_external(task_id, task)
+                    self._rename_clip_output(task_id, task, safe_channel, safe_title)
                     return
 
         raise RuntimeError(
             f"클립 재생 URL을 추출할 수 없습니다. "
             f"content 키: {list(content.keys())}"
         )
+
+    def _rename_clip_output(
+        self, task_id: str, task: VodDownloadTask, channel: str, title: str
+    ) -> None:
+        """_download_external이 덮어쓴 task.title·output_path를 클립 메타 기반으로 복원한다."""
+        proper_title = f"[{channel}] {title}"
+        task.title = proper_title
+
+        if not task.output_path:
+            return
+        src = Path(task.output_path)
+        if not src.exists():
+            return
+        dst = src.parent / f"{proper_title}{src.suffix}"
+        try:
+            src.rename(dst)
+            task.output_path = str(dst)
+            logger.info(f"[{task_id}] 클립 파일명 변경: {src.name} → {dst.name}")
+        except Exception as e:
+            logger.warning(f"[{task_id}] 클립 파일명 변경 실패: {e}")
 
     async def _download_x_spaces_replay(self, task_id: str, task: VodDownloadTask) -> None:
         """pscp.tv master_playlist.m3u8을 ffmpeg로 직접 다운로드한다.
