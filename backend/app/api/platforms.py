@@ -43,12 +43,6 @@ class TwitcastingSettingsRequest(BaseModel):
     client_secret: str = Field(..., description="TwitCasting Client Secret")
 
 
-class XSettingsRequest(BaseModel):
-    """X Spaces 인증 설정 업데이트 요청."""
-
-    bearer_token: str = Field(..., description="X Bearer Token (OAuth 2.0 App-Only)")
-
-
 # ── 채널 관리 ────────────────────────────────────────────
 
 @router.post("/channels", summary="멀티 플랫폼 채널 추가")
@@ -72,13 +66,6 @@ async def add_platform_channel(req: AddPlatformChannelRequest):
                 status_code=400,
                 detail="TwitCasting 채널을 추가하려면 먼저 설정에서 Client ID와 Client Secret을 입력해주세요.",
             )
-    elif platform == Platform.X_SPACES:
-        if not settings.x_bearer_token:
-            raise HTTPException(
-                status_code=400,
-                detail="X Spaces 채널을 추가하려면 먼저 설정에서 Bearer Token을 입력해주세요.",
-            )
-
     # URL로 입력해도 ID만 추출
     channel_id = req.channel_id
     if platform == Platform.TWITCASTING:
@@ -160,8 +147,8 @@ async def get_platform_status():
             "authenticated": bool(settings.twitcasting_client_id and settings.twitcasting_client_secret),
         },
         "x_spaces": {
-            "enabled": bool(settings.x_bearer_token),
-            "authenticated": bool(settings.x_bearer_token),
+            "enabled": True,
+            "authenticated": bool(settings.x_cookie_file),
             "cookie_file_set": bool(settings.x_cookie_file),
         },
     }
@@ -179,14 +166,6 @@ async def update_twitcasting_settings(req: TwitcastingSettingsRequest):
     # 캐시 무효화
     get_settings.cache_clear()
     return {"message": "TwitCasting 인증 설정 저장 완료."}
-
-
-@router.put("/settings/x", summary="X Spaces 인증 설정 업데이트")
-async def update_x_settings(req: XSettingsRequest):
-    """X Bearer Token을 .env 파일에 저장합니다."""
-    _update_env_file({"X_BEARER_TOKEN": req.bearer_token})
-    get_settings.cache_clear()
-    return {"message": "X Spaces 인증 설정 저장 완료."}
 
 
 import sys as _sys

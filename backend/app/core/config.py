@@ -114,7 +114,6 @@ class Settings(BaseSettings):
     twitcasting_client_secret: Optional[str] = None
 
     # ── X Spaces 인증 ────────────────────────────────────
-    x_bearer_token: Optional[str] = None
     x_cookie_file: Optional[str] = None  # Netscape 형식 쿠키 파일 경로
 
     def resolve_ytdlp_path(self, auto_download: bool = False) -> str:

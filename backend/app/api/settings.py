@@ -111,8 +111,7 @@ async def get_current_settings():
         # TwitCasting 인증 (설정 여부만 — 실제 값은 노출 안 함)
         "twitcasting_client_id": "***" if settings.twitcasting_client_id else None,
         "twitcasting_client_secret": None,
-        # X Spaces 인증 (설정 여부만)
-        "x_bearer_token": "***" if settings.x_bearer_token else None,
+        # X Spaces 인증
         "x_cookie_file": settings.x_cookie_file,
     }
 

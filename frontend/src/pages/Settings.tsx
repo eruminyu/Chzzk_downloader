@@ -148,9 +148,7 @@ export default function Settings() {
     const [twitcastingSaving, setTwitcastingSaving] = useState(false);
 
     // ── X Spaces auth state ──
-    const [xBearerToken, setXBearerToken] = useState("");
     const [xCookieFileSet, setXCookieFileSet] = useState(false);
-    const [xSaving, setXSaving] = useState(false);
     const [xCookieUploading, setXCookieUploading] = useState(false);
     const cookieFileInputRef = useRef<HTMLInputElement>(null);
 
@@ -211,7 +209,6 @@ export default function Settings() {
                        vodFormat !== (settings.vod_format || "mp4");
             case "auth":
                 return (twitcastingClientId !== "" || twitcastingClientSecret !== "") ||
-                       xBearerToken !== "" ||
                        (nidAut !== "" || nidSes !== "");
             case "notifications":
                 return chatArchiveEnabled !== settings.chat_archive_enabled ||
@@ -237,7 +234,6 @@ export default function Settings() {
             if (activeTab === "auth") {
                 setTwitcastingClientId("");
                 setTwitcastingClientSecret("");
-                setXBearerToken("");
                 setNidAut("");
                 setNidSes("");
             } else if (activeTab === "appearance") {
@@ -353,23 +349,6 @@ export default function Settings() {
             toast.error(getErrorMessage(e, "TwitCasting 설정 저장에 실패했습니다."));
         } finally {
             setTwitcastingSaving(false);
-        }
-    };
-
-    const handleSaveX = async () => {
-        if (!xBearerToken) {
-            toast.error("Bearer Token을 입력하세요.");
-            return;
-        }
-        setXSaving(true);
-        try {
-            await api.updateXSettings({ bearer_token: xBearerToken });
-            toast.success("X Spaces 인증 설정이 저장되었습니다.");
-            setXBearerToken("");
-        } catch (e: unknown) {
-            toast.error(getErrorMessage(e, "X 설정 저장에 실패했습니다."));
-        } finally {
-            setXSaving(false);
         }
     };
 
@@ -996,29 +975,10 @@ export default function Settings() {
                                 X Spaces
                             </h3>
                             <p className="text-xs text-zinc-500">
-                                X API v2 Bearer Token 및 쿠키 파일 설정입니다.{" "}
-                                <a
-                                    href="https://developer.x.com/en/portal/dashboard"
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="text-cyan-400 hover:underline"
-                                >
-                                    developer.x.com
-                                </a>
-                                {" "}에서 앱 생성 후 Bearer Token을 발급받으세요.
+                                X Spaces 녹화 시 사용할 쿠키 파일을 업로드하세요. 브라우저 확장(cookies.txt)으로 추출할 수 있습니다.
                             </p>
 
                             <div className="space-y-4">
-                                <div className="space-y-2">
-                                    <label className="text-sm font-medium text-zinc-300">Bearer Token</label>
-                                    <input
-                                        type="password"
-                                        className="w-full bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-cyan-500"
-                                        value={xBearerToken}
-                                        onChange={(e) => setXBearerToken(e.target.value)}
-                                        placeholder="X Bearer Token (변경 시에만 입력)..."
-                                    />
-                                </div>
                                 <div className="space-y-2">
                                     <label className="text-sm font-medium text-zinc-300">
                                         쿠키 파일{" "}
@@ -1061,20 +1021,8 @@ export default function Settings() {
                                             </button>
                                         )}
                                     </div>
-                                    <p className="text-xs text-zinc-500">
-                                        yt-dlp로 스페이스 녹화 시 사용됩니다. 브라우저 확장(cookies.txt)으로 추출하세요.
-                                    </p>
                                 </div>
                             </div>
-
-                            <button
-                                onClick={handleSaveX}
-                                disabled={xSaving}
-                                className="w-full bg-cyan-600 hover:bg-cyan-500 disabled:bg-zinc-700 text-white py-2.5 rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
-                            >
-                                {xSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                                {xSaving ? "저장 중..." : "X Spaces 설정 저장"}
-                            </button>
                         </div>
                     </div>
                 )}
@@ -1289,9 +1237,9 @@ export default function Settings() {
                                 </span>
                             </div>
                             <div className="flex justify-between py-2">
-                                <span className="text-zinc-500">X Spaces 설정</span>
-                                <span className={settings?.x_bearer_token ? "text-cyan-400" : "text-zinc-500"}>
-                                    {settings?.x_bearer_token ? "설정됨" : "미설정"}
+                                <span className="text-zinc-500">X Spaces 쿠키</span>
+                                <span className={settings?.x_cookie_file ? "text-cyan-400" : "text-zinc-500"}>
+                                    {settings?.x_cookie_file ? "설정됨" : "미설정"}
                                 </span>
                             </div>
                         </div>

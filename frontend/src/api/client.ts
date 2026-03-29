@@ -123,7 +123,6 @@ export interface Settings {
     twitcasting_client_secret?: string;
 
     // X Spaces 인증
-    x_bearer_token?: string;
     x_cookie_file?: string;
 }
 
@@ -136,10 +135,6 @@ export interface PlatformStatus {
 export interface TwitcastingSettingsUpdate {
     client_id: string;
     client_secret: string;
-}
-
-export interface XSettingsUpdate {
-    bearer_token: string;
 }
 
 export interface GeneralSettingsUpdate {
@@ -411,10 +406,6 @@ export const api = {
     },
     updateTwitcastingSettings: async (data: TwitcastingSettingsUpdate) => {
         const res = await client.put("/platforms/settings/twitcasting", data);
-        return res.data;
-    },
-    updateXSettings: async (data: XSettingsUpdate) => {
-        const res = await client.put("/platforms/settings/x", data);
         return res.data;
     },
     uploadXCookie: async (file: File) => {
