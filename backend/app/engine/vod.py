@@ -331,12 +331,10 @@ class VodEngine:
             task.started_at = datetime.now()
             logger.info(f"[{task_id}] 다운로드 시작: {task.url}")
 
-            # URL 타입 감지 + 클립 URL을 비디오 URL로 변환
-            if self._is_chzzk_url(task.url) and "/clips/" in task.url:
-                task.url = await self._resolve_clip_url(task_id, task.url)
-
             try:
-                if self._is_x_spaces_url(task.url):
+                if self._is_chzzk_url(task.url) and "/clips/" in task.url:
+                    await self._download_clip(task_id, task)
+                elif self._is_x_spaces_url(task.url):
                     await self._download_x_spaces_replay(task_id, task)
                 else:
                     await self._download_external(task_id, task)
@@ -399,55 +397,80 @@ class VodEngine:
                         # 에러 발생 시 이력 저장
                         self._save_history()
 
-    async def _resolve_clip_url(self, task_id: str, clip_url: str) -> str:
-        """치지직 클립 URL을 비디오 URL로 변환한다.
+    async def _download_clip(self, task_id: str, task: VodDownloadTask) -> None:
+        """치지직 클립 전용 다운로드.
 
-        Chzzk 클립 API에서 videoId를 조회한 뒤
-        https://chzzk.naver.com/video/{videoId} 형식으로 반환한다.
-        videoId를 가져올 수 없으면 원본 URL을 그대로 반환한다.
+        yt-dlp chzzk:video 익스트랙터는 숫자 ID만 지원하므로, 클립 play-info API에서
+        직접 재생 URL을 추출해 yt-dlp에 전달한다.
+
+        시도 순서:
+        1. ABR_HLS: videoId(해시) + inKey → MPD URL → yt-dlp
+        2. HLS: liveRewindPlaybackJson → HLS path → yt-dlp
         """
         import re
+        import json as _json
+        import httpx
 
-        match = re.search(r"/clips/([^/?#]+)", clip_url)
+        match = re.search(r"/clips/([^/?#]+)", task.url)
         if not match:
-            return clip_url
+            raise RuntimeError(f"클립 URL 파싱 실패: {task.url}")
 
         clip_id = match.group(1)
         api_url = f"https://api.chzzk.naver.com/service/v1/play-info/clip/{clip_id}"
         headers = self._auth.get_http_headers()
 
-        try:
-            import httpx
-            async with httpx.AsyncClient() as client:
-                resp = await client.get(api_url, headers=headers, timeout=10.0)
-                resp.raise_for_status()
-                data = resp.json()
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(api_url, headers=headers, timeout=10.0)
+            resp.raise_for_status()
+            data = resp.json()
 
-            content = data.get("content") or {}
-            logger.debug(f"[{task_id}] 클립 API 응답 content 키: {list(content.keys())}")
+        content = data.get("content") or {}
+        logger.info(f"[{task_id}] 클립 API 응답 키: {list(content.keys())}")
 
-            # videoNo (순수 숫자 ID) 우선 사용 — yt-dlp chzzk:video 익스트랙터의
-            # _VALID_URL 패턴이 `\d+` (숫자만)이기 때문에 해시 형태의 videoId를 쓰면
-            # 앞 숫자 부분만 잘려 404 오류 발생
-            video_no = content.get("videoNo")
-            if video_no:
-                video_url = f"https://chzzk.naver.com/video/{video_no}"
-                logger.info(f"[{task_id}] 클립 URL 변환 (videoNo): {clip_url} → {video_url}")
-                return video_url
+        # 제목 설정
+        clip_meta = content.get("clip") or {}
+        clip_title = (
+            clip_meta.get("clipTitle")
+            or clip_meta.get("videoTitle")
+            or content.get("clipTitle")
+            or "Unknown Clip"
+        )
+        task.title = f"[Clip] {clip_title}"
 
-            # videoNo가 없을 때만 videoId(해시) 시도
-            video_id = content.get("videoId")
-            if video_id:
-                video_url = f"https://chzzk.naver.com/video/{video_id}"
-                logger.warning(
-                    f"[{task_id}] 클립 URL 변환 (videoId 해시 사용 — 실패 가능): {clip_url} → {video_url}"
-                )
-                return video_url
+        # 방법 1: ABR_HLS (videoId 해시 + inKey → MPD URL)
+        video_id = content.get("videoId")
+        in_key = content.get("inKey")
+        if video_id and in_key:
+            playback_url = (
+                f"https://apis.naver.com/neonplayer/vodplay/v1/playback/{video_id}"
+                f"?key={in_key}&env=real&lc=en_US&cpl=en_US"
+            )
+            logger.info(f"[{task_id}] 클립 ABR_HLS 재생 URL 사용: {playback_url[:80]}...")
+            task.url = playback_url
+            await self._download_external(task_id, task)
+            return
 
-        except Exception as e:
-            logger.warning(f"[{task_id}] 클립 API 조회 실패, 원본 URL 사용: {e}")
+        # 방법 2: HLS (liveRewindPlaybackJson 또는 playbackJson)
+        for json_key in ("liveRewindPlaybackJson", "playbackJson"):
+            raw = content.get(json_key)
+            if not raw:
+                continue
+            try:
+                playback = _json.loads(raw) if isinstance(raw, str) else raw
+            except Exception:
+                continue
+            for media in (playback.get("media") or []):
+                hls_path = media.get("path") or ""
+                if hls_path.startswith("http"):
+                    logger.info(f"[{task_id}] 클립 HLS URL 사용 ({json_key}): {hls_path[:80]}...")
+                    task.url = hls_path
+                    await self._download_external(task_id, task)
+                    return
 
-        return clip_url
+        raise RuntimeError(
+            f"클립 재생 URL을 추출할 수 없습니다. "
+            f"content 키: {list(content.keys())}"
+        )
 
     async def _download_x_spaces_replay(self, task_id: str, task: VodDownloadTask) -> None:
         """pscp.tv master_playlist.m3u8을 ffmpeg로 직접 다운로드한다.
