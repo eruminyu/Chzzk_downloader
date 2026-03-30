@@ -1,5 +1,15 @@
 # Chzzk-Recorder-Pro 개발 체크리스트
 
+## 2026-03-30: 라이브 감지 직후 녹화 실패 & 재시도 불가 버그 수정
+
+### 버그
+- 방송 감지 즉시 yt-dlp 실행 → CDN 미준비 → `No video formats found!` 에러
+- `_extract_hls_url` 실패 시 `pipeline.state`가 `IDLE` 유지 → Conductor 재시도 조건 불만족 → 수동 개입 전까지 재시도 없음
+
+### 수정
+- [x] `pipeline.py`: `_extract_hls_url` 실패 시 `self._state = RecordingState.ERROR` 세팅 후 re-raise
+- [x] `conductor.py`: `_start_recording` 최초 시도(`is_retry=False`) 시 5초 CDN 준비 대기 추가
+
 ## 2026-03-28: X Spaces 종료 감지 버그 수정 + master URL 파일 저장
 
 ### 배경

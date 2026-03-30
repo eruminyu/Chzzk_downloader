@@ -851,6 +851,13 @@ class Conductor:
             live_url = engine.get_stream_url(task.channel_id)
             cookie_str = self._auth.get_ytdlp_cookies()
 
+            # 최초 감지 시 CDN이 스트림 URL을 준비하는 시간을 확보
+            if not is_retry:
+                logger.debug(f"[{composite_key}] 스트림 CDN 준비 대기 (5초)...")
+                await asyncio.sleep(5)
+                if not self._running:
+                    return
+
             pipeline = YtdlpLivePipeline(channel_id=task.channel_id)
             task.pipeline = pipeline
 

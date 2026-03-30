@@ -547,9 +547,13 @@ class YtdlpLivePipeline:
         self._output_path = str(output_file)
 
         # ── Phase 1: yt-dlp로 HLS URL + HTTP 헤더 추출 ──
-        hls_url, http_headers = await self._extract_hls_url(
-            page_url, quality, cookie_str
-        )
+        try:
+            hls_url, http_headers = await self._extract_hls_url(
+                page_url, quality, cookie_str
+            )
+        except Exception:
+            self._state = RecordingState.ERROR
+            raise
 
         # ── Phase 2: ffmpeg으로 직접 녹화 ──
         ffmpeg_path = settings.resolve_ffmpeg_path()
